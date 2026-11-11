@@ -1,0 +1,16 @@
+schema: spec-driven
+
+context: |
+  Use Rust for application logic, rapid-mlx integration, persistence, and telemetry.
+  Deliver a desktop UI. Record UI framework and additional language decisions before scaffolding.
+  Keep model discovery and session data local by default; network operations must be explicit.
+  Verify rapid-mlx interfaces and model capabilities rather than assuming APIs or effort support.
+  Preserve existing Hugging Face model caches and externally managed runtime processes.
+  Distinguish measured statistics, estimates, and unavailable values.
+
+rules:
+  design:
+    - Document verified runtime interfaces and unresolved capability questions for affected integrations.
+    - Define session history and usage accounting semantics when changing chat or statistics behavior.
+  tasks:
+    - Include suitable validation for affected behavior and documentation updates when needed.
