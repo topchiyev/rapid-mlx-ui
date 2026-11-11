@@ -11,15 +11,17 @@ The repository now contains a two-crate Rust workspace, an egui/eframe desktop U
 The current development target is **macOS 27 on Apple Silicon**, tested with **Rust 1.96.1**. An existing rapid-mlx **1.0.2** installation is required for managed inference; the app does not install it. See [runtime compatibility](./docs/compatibility.md) for source-backed support and limitations.
 
 ```sh
-cargo run -p rapid-mlx-ui
+./scripts/run.sh
 ```
+
+The [run script](./scripts/run.sh) runs `cargo run -p rapid-mlx-ui` from the repository root and forwards arguments to the app. It can also be invoked by path from another directory.
 
 The window opens without automatically starting a server, downloading models, recording audio, or connecting registered MCP servers. Configure the runtime executable and model locations in Settings, choose a local model revision, then Load or explicitly Connect to an external loopback server. External served models must be selected by their advertised identity.
 
 To inspect synthetic UI fixtures without writing application data or running real operations:
 
 ```sh
-cargo run -p rapid-mlx-ui -- --demo
+./scripts/run.sh --demo
 ```
 
 Create a local unsigned app bundle:
@@ -76,6 +78,8 @@ Tests do not require model weights or microphone access. The successful real std
 ## OpenSpec workflow
 
 The active [proposal](./openspec/changes/plan-rapid-mlx-desktop/proposal.md), [design](./openspec/changes/plan-rapid-mlx-desktop/design.md), [acceptance specs](./openspec/changes/plan-rapid-mlx-desktop/specs/), and [tasks](./openspec/changes/plan-rapid-mlx-desktop/tasks.md) define the implementation. Main specs are populated when the completed change is archived.
+
+The completed [run-script change](./openspec/changes/archive/2026-11-11-add-run-script/) is archived, with its contract in the [development launch specification](./openspec/specs/development-launch/spec.md).
 
 OpenSpec 1.17.0 uses the `spec-driven` schema with Codex skills. Invoke `$openspec-propose`, `$openspec-update-change`, or `$openspec-apply-change` for the relevant workflow. The CLI can run through `npx --yes @fission-ai/openspec@1.17.0` without a global installation.
 
