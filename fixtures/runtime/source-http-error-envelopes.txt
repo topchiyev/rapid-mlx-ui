@@ -1,0 +1,47 @@
+middleware/exception_handlers.py:894-939
+_HTTP_ERROR_TYPE_MAP = {
+    400: "invalid_request_error",
+    401: "authentication_error",
+    403: "permission_error",
+    404: "not_found_error",
+    405: "invalid_request_error",
+    409: "conflict_error",
+    429: "rate_limit_error",
+}
+
+
+def _http_error_response(exc: StarletteHTTPException) -> JSONResponse:
+    """Build the OpenAI-shaped envelope for a Starlette ``HTTPException``.
+
+    Routes can opt in to a fully custom envelope by raising
+    ``HTTPException(detail={"error": {...}})`` — the structured detail
+    is passed through unchanged. Bare-string detail is wrapped in the
+    legacy envelope so existing callers keep working.
+    """
+    detail = exc.detail
+    if isinstance(detail, dict) and isinstance(detail.get("error"), dict):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=detail,
+            headers=getattr(exc, "headers", None),
+        )
+    code = None
+    if (
+        exc.status_code == 400
+        and isinstance(exc.detail, str)
+        and exc.detail == "There was an error parsing the body"
+    ):
+        code = "invalid_request"
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": {
+                "message": str(exc.detail),
+                "type": _HTTP_ERROR_TYPE_MAP.get(exc.status_code, "api_error"),
+                "code": code,
+                "param": None,
+            }
+        },
+        headers=getattr(exc, "headers", None),
+    )
+

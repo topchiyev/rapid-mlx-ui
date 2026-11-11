@@ -1,0 +1,19 @@
+{
+  "openapi": "3.1.0",
+  "info": {"title": "Synthetic rapid-mlx schema subset", "version": "0.6.0"},
+  "paths": {
+    "/health": {"get": {}},
+    "/v1/models": {"get": {}},
+    "/v1/chat/completions": {"post": {}},
+    "/v1/requests/{request_id}/cancel": {"post": {}}
+  },
+  "components": {"schemas": {"ChatCompletionRequest": {"properties": {
+    "messages": {"type": "array"},
+    "temperature": {"type": "number", "minimum": 0, "maximum": 2},
+    "top_p": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+    "max_tokens": {"type": "integer"},
+    "max_completion_tokens": {"type": "integer"},
+    "reasoning_effort": {"enum": ["none", "minimal", "low", "medium", "high", "xhigh"]},
+    "tools": {"type": "array"}
+  }}}}
+}

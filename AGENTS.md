@@ -10,6 +10,7 @@ Build a desktop app that manages rapid-mlx and provides a complete UI for local 
 - Deliver a desktop UI as part of the product.
 - Use OpenSpec for specifications and implementation planning.
 - Keep the application focused on local models and local session data by default.
+- Store all app-owned state under `~/.rapid-mlx-ui`, including sessions/drafts, preferences, MCP registrations, transcripts, managed audio, logs/caches, and backups. Existing shared model caches retain their configured locations.
 - Do not select a UI framework or introduce an additional implementation language implicitly. Record the decision and its tradeoffs before scaffolding it.
 
 ## OpenSpec workflow
@@ -29,7 +30,8 @@ Build a desktop app that manages rapid-mlx and provides a complete UI for local 
 - Track runtime ownership. Do not stop or kill an externally managed process as part of ordinary app shutdown.
 - Handle process exits, failed startup, disconnected streams, cancellation, and model-loading failures explicitly.
 - Keep long-running work off the UI thread and release processes, streams, and monitoring tasks cleanly.
-- Discover local models without modifying or deleting existing Hugging Face cache contents. Do not trigger downloads implicitly.
+- Discover local models without modifying existing Hugging Face cache contents. Model pulling and cache-aware deletion are separate explicit user actions; never trigger downloads or deletion implicitly or delete weights when deleting a session.
+- Provide basic scoped OS tools, MCP client connectivity and server registration, and local transcription with an independently selected transcription model. See the active OpenSpec change for their contracts.
 - Avoid adding unrelated remote services or background network calls.
 
 ## Chat and sessions

@@ -1,0 +1,22 @@
+usage: rapid-mlx models [-h] [--cached] [--json] [--search TERM]
+                        [--modality {text,video-gen,image-gen,audio}]
+
+options:
+  -h, --help            show this help message and exit
+  --cached              Only list models that are downloaded to the local
+                        HuggingFace cache (alias, HF repo, size on disk, last
+                        modified).
+  --json                Emit the model list as machine-readable JSON instead
+                        of the human table (stable keys; pairs with --cached).
+                        Prefer this over scraping the text columns.
+  --search TERM         Case-insensitive substring match against the alias
+                        name. Narrows the 200+-line catalog to rows containing
+                        TERM (e.g. --search qwen picks only qwen aliases).
+                        Applies to the human available-models table; cannot be
+                        combined with --json or --cached.
+  --modality {text,video-gen,image-gen,audio}
+                        Show only models of this modality (text, audio, video-
+                        gen, image-gen). Omit the flag to show the full
+                        catalog: the text chat table plus every tagged
+                        section. Applies to the human available-models table;
+                        cannot be combined with --json or --cached.

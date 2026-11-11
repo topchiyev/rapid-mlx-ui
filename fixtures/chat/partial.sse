@@ -1,0 +1,6 @@
+data: {"choices":[{"delta":{"content":"partial"},"finish_reason":null}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-partial","function":{"name":"os_write","arguments":"{\"path\":"}}]},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+

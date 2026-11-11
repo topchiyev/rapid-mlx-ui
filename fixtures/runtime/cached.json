@@ -1,0 +1,23 @@
+{
+  "cached": [
+    {
+      "repo": "fixture/chat",
+      "alias": "fixture-chat",
+      "subfolder": null,
+      "size_bytes": 7,
+      "state": "ok",
+      "external": false,
+      "chat_ready": true
+    },
+    {
+      "repo": "fixture/incomplete",
+      "alias": null,
+      "size_bytes": 1,
+      "state": "incomplete",
+      "external": false,
+      "chat_ready": false
+    }
+  ],
+  "count": 2,
+  "total_bytes": 8
+}

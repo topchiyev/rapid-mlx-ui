@@ -1,0 +1,8 @@
+{
+  "error": {
+    "message": "Fixture model is unavailable",
+    "type": "not_found_error",
+    "code": null,
+    "param": null
+  }
+}

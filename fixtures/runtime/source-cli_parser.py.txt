@@ -1,0 +1,181 @@
+cli_parser.py:114-149
+    """Register ``--disable-disk-caches`` (serve and the commands that spawn it)."""
+    parser.add_argument(
+        "--disable-disk-caches",
+        action="store_true",
+        help=(
+            "Write no optional caches to disk: no prefix-cache snapshot at "
+            "shutdown or idle unload (and none loaded at startup), no KV "
+            "checkpoints, no vision prefix-cache disk tier. Takes precedence "
+            "over periodic KV checkpoints and APC_DISK_ENABLED. Also "
+            "set by RAPID_MLX_DISABLE_DISK_CACHES=1."
+        ),
+    )
+
+
+def _add_disable_model_downloads_arg(parser: argparse.ArgumentParser) -> None:
+    """Register ``--disable-model-downloads`` (serve and the commands that spawn it)."""
+    parser.add_argument(
+        "--disable-model-downloads",
+        action="store_true",
+        help=(
+            "Never download a model: serve only models that are already on "
+            "disk and reject requests for any other model. Provision models "
+            "with 'rapid-mlx pull'. Also set by "
+            "RAPID_MLX_DISABLE_MODEL_DOWNLOADS=1."
+        ),
+    )
+
+
+def _add_log_file_arg(parser: argparse.ArgumentParser) -> None:
+    """Register ``--log-file`` (serve and the commands that spawn it)."""
+    parser.add_argument(
+        "--log-file",
+        metavar="TARGET",
+        default=None,
+        help=(
+            "Send all server output (logs, tracebacks, native-library "
+
+cli_parser.py:1970-1995
+    # Parent-PID watchdog (rapid-desktop issue #449). When set, the
+    # sidecar polls ``os.getppid()`` every 2 s and self-terminates if
+    # the parent dies (re-parent to launchd / init on macOS/Linux). The
+    # supervisor passes its own PID at spawn so a SIGKILL on the desktop
+    # cannot leave a 30 GB orphan holding the model + port. ``0`` /
+    # negative / unset disables. The ``RAPID_MLX_WATCHDOG_PPID`` env var
+    # is honoured as a fallback when the CLI flag is omitted; the flag
+    # wins when both are present.
+    serve_parser.add_argument(
+        "--watchdog-ppid",
+        type=int,
+        default=None,
+        metavar="PID",
+        help=(
+            "Self-terminate when the parent with this PID dies (defeats "
+            "orphan-sidecar after SIGKILL on the supervisor). Honors "
+            "$RAPID_MLX_WATCHDOG_PPID as a fallback. Set to 0 / unset to "
+            "disable."
+        ),
+    )
+    # PFlash long-prompt prefill compression (#287). Off by default; see
+    # rapid_mlx/pflash.py for the design and the prefix-cache bypass.
+    _add_pflash_args(serve_parser)
+
+
+def _add_bench_parser(
+
+cli_parser.py:2490-2578
+def _add_pull_parser(
+    subparsers: "argparse._SubParsersAction[_PortContextArgumentParser]",
+) -> None:
+    """Register the ``pull`` subcommand."""
+    # Pull / rm / ps — Ollama-style cache and process management.
+    pull_parser = subparsers.add_parser(
+        "pull", help="Download a model to the HuggingFace cache (no server)"
+    )
+    pull_parser.add_argument(  # type: ignore[attr-defined]  # argcomplete attribute
+        "model", help="Model alias (e.g. qwen3.5-4b-4bit) or HF repo (org/name)"
+    ).completer = alias_completer
+    pull_parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Check metadata and memory fit without downloading",
+    )
+    pull_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="With --check, print one schema-v1 JSON verdict",
+    )
+    pull_parser.add_argument(
+        "--with-ref2va",
+        action="store_true",
+        help="Pika H3 Flex only: also download the Ref2VA second transformer and adapter, about 69 GB",
+    )
+    # #2145: a multi-variant repo ships every quantization side by side as
+    # top-level folders (e.g. LiquidAI/LFM2.5-2.6B-MLX holds 4bit/ 5bit/ 6bit/
+    # 8bit/ mxfp4/...). Without selection, `pull <repo>` fetches ALL of them.
+    # These flags let a constrained Mac fetch only the variant it can serve.
+    # They select the SAME dimension (one variant folder), so --bits and
+    # --format are mutually exclusive — passing both would be ambiguous about
+    # which single variant the caller wants.
+    _variant_group = pull_parser.add_mutually_exclusive_group()
+    _variant_group.add_argument(
+        "--bits",
+        metavar="N",
+        help=(
+            "Pull only the <N>bit variant of a multi-variant repo "
+            "(e.g. --bits 4 fetches only 4bit/; any N the repo ships works)."
+        ),
+    )
+    _variant_group.add_argument(
+        "--format",
+        metavar="name",
+        help=(
+            "Pull only the named format variant of a multi-variant repo "
+            "(e.g. --format mxfp4, when the repo ships one). GGUF is not "
+            "supported: Rapid-MLX cannot run GGUF files."
+        ),
+    )
+    pull_parser.add_argument(
+        "--request",
+        action="store_true",
+        default=False,
+        help=(
+            "If the pre-download check refuses a public Hugging Face model "
+            "(unsupported architecture or GGUF/.bin-only), file a support "
+            "request without asking. Sends only the repo id, architecture, "
+            "format, failure class and Rapid-MLX version."
+        ),
+    )
+    pull_parser.add_argument(
+        "--no-preflight",
+        action="store_true",
+        default=False,
+        help=(
+            "Skip catalog memory admission and the pre-download format and "
+            "architecture check for models outside the Rapid-MLX catalog."
+        ),
+    )
+
+
+def _add_import_parser(
+    subparsers: "argparse._SubParsersAction[_PortContextArgumentParser]",
+) -> None:
+    """Register the ``import`` subcommand."""
+    import_parser = subparsers.add_parser(
+        "import",
+        help="Convert a bf16/fp16 safetensors model to quantized MLX (explicit, "
+        "cancel-safe)",
+    )
+    import_parser.add_argument(
+        "source", help="Hugging Face repo id (org/name) or local model directory"
+    )
+    import_parser.add_argument(
+        "--quantize",
+        type=int,
+        choices=[2, 3, 4, 6, 8],
+
+cli_parser.py:2596-2618
+def _add_rm_parser(
+    subparsers: "argparse._SubParsersAction[_PortContextArgumentParser]",
+) -> None:
+    """Register the ``rm`` subcommand."""
+    rm_parser = subparsers.add_parser(
+        "rm", help="Remove a cached model from the HuggingFace cache"
+    )
+    rm_parser.add_argument(  # type: ignore[attr-defined]  # argcomplete attribute
+        "model", help="Model alias (e.g. qwen3.5-4b-4bit) or HF repo (org/name)"
+    ).completer = alias_completer
+    rm_parser.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="Skip the confirmation prompt and remove the model immediately.",
+    )
+
+
+def _add_alias_parser(
+    subparsers: "argparse._SubParsersAction[_PortContextArgumentParser]",
+) -> None:
+    """Register the ``alias`` subcommand."""
+    alias_parser = subparsers.add_parser(

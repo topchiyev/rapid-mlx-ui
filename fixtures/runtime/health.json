@@ -1,0 +1,9 @@
+{
+  "status": "healthy",
+  "ready": true,
+  "model_loaded": true,
+  "model_name": "fixture-chat",
+  "model_type": "llm",
+  "state": "ready",
+  "engine_type": "fixture"
+}

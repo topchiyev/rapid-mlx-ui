@@ -1,0 +1,765 @@
+usage: rapid-mlx serve [-h] [--cua-only] [--yes]
+                       [--served-model-name SERVED_MODEL_NAME]
+                       [--force-disk-check]
+                       [--image-weight-precision {q4,bf16}] [--disk-stream]
+                       [--request] [--no-preflight]
+                       [--disk-stream-cache-gb DISK_STREAM_CACHE_GB]
+                       [--host HOST] [--port PORT] [--video-output-dir PATH]
+                       [--listen-fd FD]
+                       [--log-level {DEBUG,INFO,WARNING,ERROR}]
+                       [--log-file TARGET] [--dsv41-lanes {1,2,4,8} |
+                       --no-dsv41-lanes] [--tensorfold-lanes {1,2,4,8}]
+                       [--max-num-seqs MAX_NUM_SEQS]
+                       [--max-concurrent-requests MAX_CONCURRENT_REQUESTS]
+                       [--prefill-batch-size PREFILL_BATCH_SIZE]
+                       [--completion-batch-size COMPLETION_BATCH_SIZE]
+                       [--scheduling-policy {fcfs,shortest_validated_tail}]
+                       [--scheduling-max-deferrals N]
+                       [--shared-prefix-wait-tokens N]
+                       [--decode-stall-target-ms MS] [--enable-prefix-cache]
+                       [--disable-prefix-cache] [--disable-disk-caches]
+                       [--disable-model-downloads]
+                       [--prefix-cache-size PREFIX_CACHE_SIZE]
+                       [--cache-memory-mb CACHE_MEMORY_MB]
+                       [--cache-memory-percent CACHE_MEMORY_PERCENT]
+                       [--idle-cache-clear-seconds IDLE_CACHE_CLEAR_SECONDS]
+                       [--hybrid-cache-entries HYBRID_CACHE_ENTRIES]
+                       [--metal-cap-kv-bytes-per-token BYTES]
+                       [--response-cache-entries RESPONSE_CACHE_ENTRIES]
+                       [--no-memory-aware-cache]
+                       [--prefix-cache-index {radix,hash}]
+                       [--mllm-singleton-fastpath {auto,off}]
+                       [--mllm-media-prefix-cache {auto,off}]
+                       [--kv-cache-dtype {bf16,int8,int4}] [--reasoning]
+                       [--kv-cache-quantization]
+                       [--kv-cache-quantization-bits {4,8}]
+                       [--kv-cache-quantization-group-size KV_CACHE_QUANTIZATION_GROUP_SIZE]
+                       [--kv-cache-min-quantize-tokens KV_CACHE_MIN_QUANTIZE_TOKENS]
+                       [--kv-cache-turboquant [{v4,k8v4,none}]]
+                       [--kv-cache-turboquant-bits {3,4}]
+                       [--kv-cache-turboquant-group-size KV_CACHE_TURBOQUANT_GROUP_SIZE]
+                       [--kv-disk-checkpoint-interval KV_DISK_CHECKPOINT_INTERVAL]
+                       [--stream-interval STREAM_INTERVAL]
+                       [--max-tokens MAX_TOKENS]
+                       [--speculative-config SPECULATIVE_CONFIG]
+                       [--gpu-memory-utilization GPU_MEMORY_UTILIZATION]
+                       [--resident-memory-limit-gb RESIDENT_MEMORY_LIMIT_GB]
+                       [--resident-model-idle-ttl RESIDENT_MODEL_IDLE_TTL]
+                       [--lazy-load]
+                       [--idle-unload-seconds IDLE_UNLOAD_SECONDS]
+                       [--use-paged-cache]
+                       [--paged-cache-block-size PAGED_CACHE_BLOCK_SIZE]
+                       [--max-cache-blocks MAX_CACHE_BLOCKS] [--enable-audio]
+                       [--prefill-step-size PREFILL_STEP_SIZE]
+                       [--vision-prefill-token-budget VISION_PREFILL_TOKEN_BUDGET]
+                       [--vision-min-pixels VISION_MIN_PIXELS]
+                       [--vision-max-pixels VISION_MAX_PIXELS]
+                       [--mcp-config MCP_CONFIG]
+                       [--allow-unauthenticated-public] [--api-key API_KEY]
+                       [--cors-origins ORIGIN [ORIGIN ...]]
+                       [--trusted-hosts HOST [HOST ...]]
+                       [--rate-limit RATE_LIMIT]
+                       [--max-request-bytes MAX_REQUEST_BYTES]
+                       [--max-prompt-tokens TOKENS] [--context-length TOKENS]
+                       [--timeout TIMEOUT] [--enable-auto-tool-choice]
+                       [--tool-call-parser TOOL_CALL_PARSER]
+                       [--enable-tool-logits-bias]
+                       [--reasoning-parser {gemma4,qwen3,hy_v3,hy3,k2_horizon,deepseek_r1,deepseek_r1_distill,deepseek_v4,vibethinker,glm4,glm5,gpt_oss,harmony,minimax,muse,ui_tars,cohere_command4,north}]
+                       [--default-reasoning-effort EFFORT] [--no-thinking]
+                       [--no-tool-call-parser] [--no-reasoning-parser]
+                       [--force-hybrid] [--no-hybrid] [--force-spec-decode]
+                       [--no-spec-decode] [--force-openai-harmony-streaming]
+                       [--no-openai-harmony-streaming] [--gc-control]
+                       [--no-gc-control] [--pin-system-prompt]
+                       [--relocate-mid-conversation-system] [--mllm]
+                       [--no-mllm] [--default-temperature DEFAULT_TEMPERATURE]
+                       [--default-top-p DEFAULT_TOP_P]
+                       [--default-top-k DEFAULT_TOP_K]
+                       [--default-min-p DEFAULT_MIN_P]
+                       [--default-repetition-penalty DEFAULT_REPETITION_PENALTY]
+                       [--default-presence-penalty DEFAULT_PRESENCE_PENALTY]
+                       [--default-frequency-penalty DEFAULT_FREQUENCY_PENALTY]
+                       [--embedding-max-inputs EMBEDDING_MAX_INPUTS]
+                       [--embedding-model EMBEDDING_MODEL]
+                       [--enable-local-search] [--local-search-dir DIR]
+                       [--embedding-max-length TOKENS]
+                       [--embedding-overflow-policy {truncate,error}]
+                       [--rerank-model RERANK_MODEL]
+                       [--rerank-model-family {bge2,jina3,mxbai2,qwen3,roberta}]
+                       [--rerank-instruction TEXT] [--rerank-prompt TEXT]
+                       [--rerank-max-documents N] [--rerank-max-length TOKENS]
+                       [--rerank-overflow-policy {truncate,error}]
+                       [--watchdog-ppid PID] [--pflash {off,auto,always}]
+                       [--pflash-threshold PFLASH_THRESHOLD]
+                       [--pflash-keep-ratio PFLASH_KEEP_RATIO]
+                       [--pflash-min-keep-tokens PFLASH_MIN_KEEP_TOKENS]
+                       [--pflash-sink-tokens PFLASH_SINK_TOKENS]
+                       [--pflash-tail-tokens PFLASH_TAIL_TOKENS]
+                       [--pflash-block-size PFLASH_BLOCK_SIZE]
+                       [--pflash-query-window PFLASH_QUERY_WINDOW]
+                       [--pflash-stride-blocks PFLASH_STRIDE_BLOCKS]
+                       [--pflash-include-tools]
+                       [--pflash-threshold-basis {total,uncached}]
+                       [model]
+
+Start a local OpenAI-compatible inference server.
+
+  rapid-mlx serve qwen3.5-4b-4bit
+    <model>    pick yours: a short alias (rapid-mlx models) or HF repo
+    --port     bind port (default: first free in 8000-8009)
+    --host     bind host (default 127.0.0.1, loopback-only)
+    --api-key  require a bearer token on every request
+
+Once warmed up the server prints its 'Ready:' URL; the OpenAI-compatible
+endpoints (/v1/models, /v1/chat/completions, /v1/audio/*, ...) serve from
+that base URL. Most options below are advanced tuning; the common journey
+needs only a model (--port/--host default to local use).
+
+positional arguments:
+  model                 Model to serve
+
+options:
+  -h, --help            show this help message and exit
+  --cua-only            Start the authenticated Computer Use API without
+                        resolving, downloading, or loading a model
+  --yes, -y             assume yes for prompts such as installing a missing
+                        optional extra
+  --served-model-name SERVED_MODEL_NAME
+                        The model name used in the API. If not specified, the
+                        model argument is used.
+  --force-disk-check    Skip the pre-flight disk-space check that aborts when
+                        the model is larger than free disk. Use only if you
+                        know the HF cache lives on a different filesystem
+                        (e.g. external drive via HF_HOME).
+  --image-weight-precision {q4,bf16}
+                        Explicit FLUX.2 Klein weight precision. q4 keeps the
+                        compact default checkpoint; bf16 selects the full-
+                        precision checkpoint measured faster on an M2 Pro
+                        large-matrix image workload. Currently limited to
+                        FLUX.2 Klein; no automatic hardware switch.
+  --disk-stream         Stream MoE routed-expert weights from disk instead of
+                        holding them resident (opt-in). Loads the model lazily
+                        and installs rapid_mlx.disk_stream_patch on every MoE
+                        layer before serving starts. Only architectures
+                        registered in rapid_mlx.registry are supported; an
+                        unregistered model_type fails at load time.
+  --request             If the pre-download check refuses a public Hugging
+                        Face model (unsupported architecture or GGUF/.bin-
+                        only), file a support request without asking. Sends
+                        only the repo id, architecture, format, failure class
+                        and Rapid-MLX version.
+  --no-preflight        Skip the pre-download check for models outside the
+                        Rapid-MLX catalog (format, architecture and memory
+                        fit).
+  --disk-stream-cache-gb DISK_STREAM_CACHE_GB
+                        Byte budget (GB) for the disk-stream expert LRU cache.
+                        Only used when --disk-stream is set. Default: 1.0 GB,
+                        matching rapid_mlx.expert_cache.ExpertCache's default.
+  --host HOST           Host to bind (default: 127.0.0.1, loopback-only). Pass
+                        0.0.0.0 (or "") to expose the server on every
+                        interface (LAN reachable) — only do this once the
+                        bearer-auth posture has been reviewed. The wildcard
+                        bind also widens the PortSweep collision window: macOS
+                        lets a wildcard listener coexist with a more-specific
+                        (127.0.0.1) listener on the same port, so a second
+                        server may start and silently shadow the first on the
+                        loopback path. The pre-flight bind check below probes
+                        127.0.0.1 explicitly whenever --host is a wildcard
+                        alias to keep that bypass closed.
+  --port PORT           Port to bind (default when omitted: first free port in
+                        8000-8009; an explicit port never falls back)
+  --video-output-dir PATH
+                        Persist completed video jobs and MP4 files under PATH
+                        so they remain available after a server restart. The
+                        default uses a process-temporary directory.
+  --listen-fd FD        File descriptor of a pre-bound listening socket
+                        (3-1023). Used for socket activation
+                        (launchd/systemd/parent-process supervision) —
+                        supervisor binds the loopback socket, validates auth
+                        secret, then execve's into rapid-mlx. When set,
+                        --host/--port are ignored for binding. Native MTP,
+                        DSpark K4, DFlash, and DDTree reject --listen-fd with
+                        rc 2.
+  --log-level {DEBUG,INFO,WARNING,ERROR}
+                        Log level for Python logging and uvicorn (case-
+                        insensitive). Default: $RAPID_MLX_LOG_LEVEL, else
+                        INFO.
+  --log-file TARGET     Send all server output (logs, tracebacks, native-
+                        library messages) to TARGET instead of stderr: a file
+                        path (appended), '-' for stdout, /dev/stderr, or
+                        /dev/null to discard it. Default: $RAPID_MLX_LOG_FILE,
+                        else stderr.
+  --dsv41-lanes {1,2,4,8}
+                        Native DeepSeek V4.1 decode lanes: 1 keeps serial
+                        drafting (default); 2, 4 or 8 selects draft-off
+                        batched decode.
+  --no-dsv41-lanes      Keep native DeepSeek V4.1 serial drafting (equivalent
+                        to --dsv41-lanes 1).
+  --tensorfold-lanes {1,2,4,8}
+                        Concurrent decode lanes for qualified Qwen3.8-27B and
+                        Nemotron TensorFold profiles only (default: 1,
+                        serial). Overrides the deprecated
+                        RAPID_MLX_TENSORFOLD_LANES environment alias.
+  --max-num-seqs MAX_NUM_SEQS
+                        Max concurrent sequences
+  --max-concurrent-requests MAX_CONCURRENT_REQUESTS
+                        Admission cap on in-flight requests (queued +
+                        running). When exceeded, new requests return HTTP 503
+                        with Retry-After. Default 256; operators on memory-
+                        constrained devices may want to set this near ``--max-
+                        num-seqs`` to limit queue depth.
+  --prefill-batch-size PREFILL_BATCH_SIZE
+                        Max prompts prefilled together in one cold wave
+                        (default: 8). Lower it to cut first-token latency
+                        under concurrent cold load — requests start decoding
+                        sooner instead of all sharing one full-wave prefill —
+                        at an aggregate-throughput cost on large MoE models,
+                        where staggered rows carry ragged offsets that push
+                        batched attention onto a slower path (see #1861).
+  --completion-batch-size COMPLETION_BATCH_SIZE
+                        Completion batch size
+  --scheduling-policy {fcfs,shortest_validated_tail}
+                        Prompt-slot admission order (default: fcfs).
+                        shortest_validated_tail favors cache-hot and short
+                        prompts while bounding how often an older compatible
+                        request may be deferred.
+  --scheduling-max-deferrals N
+                        Maximum compatible prompt-slot grants that may pass
+                        over a request under shortest_validated_tail before it
+                        is forced FIFO (default: 8).
+  --shared-prefix-wait-tokens N
+                        A request sharing at least N uncached prompt tokens
+                        with a request that is still prefilling waits for that
+                        prompt state instead of recomputing it (default:
+                        1024). 0 disables the wait.
+  --decode-stall-target-ms MS
+                        While a request is decoding, size prompt chunks of a
+                        concurrent prefill so the decoder waits about this
+                        long between tokens (default: 500). 0 disables the
+                        bound.
+  --enable-prefix-cache
+                        Enable prefix caching for repeated prompts (default:
+                        enabled)
+  --disable-prefix-cache
+                        Disable prefix caching (in memory, and its on-disk
+                        snapshot written at shutdown)
+  --disable-disk-caches
+                        Write no optional caches to disk: no prefix-cache
+                        snapshot at shutdown or idle unload (and none loaded
+                        at startup), no KV checkpoints, no vision prefix-cache
+                        disk tier. Takes precedence over periodic KV
+                        checkpoints and APC_DISK_ENABLED. Also set by
+                        RAPID_MLX_DISABLE_DISK_CACHES=1.
+  --disable-model-downloads
+                        Never download a model: serve only models that are
+                        already on disk and reject requests for any other
+                        model. Provision models with 'rapid-mlx pull'. Also
+                        set by RAPID_MLX_DISABLE_MODEL_DOWNLOADS=1.
+  --prefix-cache-size PREFIX_CACHE_SIZE
+                        Max entries in prefix cache (default: 100, legacy mode
+                        only)
+  --cache-memory-mb CACHE_MEMORY_MB
+                        Cache memory limit in MB (default: auto-detect ~20% of
+                        RAM)
+  --cache-memory-percent CACHE_MEMORY_PERCENT
+                        Fraction of available RAM for cache if auto-detecting
+                        (default: 0.20, raised to the agent-session floor; an
+                        explicit value is kept)
+  --idle-cache-clear-seconds IDLE_CACHE_CLEAR_SECONDS
+                        Clear reusable prefix/KV cache after this many seconds
+                        with no active requests, preserving loaded model
+                        weights. 0 disables; default:
+                        RAPID_MLX_IDLE_CACHE_CLEAR_SECONDS or disabled.
+  --hybrid-cache-entries HYBRID_CACHE_ENTRIES
+                        Retain up to N non-trimmable prefix-cache entries for
+                        prefix-extension reuse (a stable prefix + a new suffix
+                        each turn); 0 disables (default: 0). Covers both
+                        hybrid recurrent-state (GatedDeltaNet/Mamba) AND
+                        sliding-window (Gemma 4, GPT-OSS) models. Best for
+                        stable-system-prompt / long-context agent workloads.
+                        An identical exact re-request of a rotated sliding-
+                        window prompt falls back to a full prefill (byte-equal
+                        to cold).
+  --metal-cap-kv-bytes-per-token BYTES
+                        Override the per-token KV-cache size the D-METAL-CAP
+                        admission gate projects, in bytes. 0 (default) auto-
+                        derives an architecture-aware fp16 figure. Set this
+                        when running a quantized KV cache (--kv-cache-
+                        turboquant / --kv-cache-quantization), whose real
+                        footprint the auto-derived figure over-estimates — an
+                        over-estimate only costs you spurious 503s, but on a
+                        memory-tight Mac that is the difference between a long
+                        prompt being served and being rejected. UNDER-setting
+                        it risks the OOM cliff the gate exists to prevent:
+                        lower it only to a value you have measured. Overrides
+                        the architecture-aware estimator wholesale (sliding-
+                        window and recurrent terms included).
+  --response-cache-entries RESPONSE_CACHE_ENTRIES
+                        Retain up to N fully-computed deterministic (greedy)
+                        chat responses; a completely repeated request returns
+                        the stored completion verbatim with zero GPU decode. 0
+                        disables (default: 0). Only temperature==0 / top_k==1
+                        requests are cached — sampled requests are never
+                        short-circuited.
+  --no-memory-aware-cache
+                        Disable memory-aware cache, use legacy entry-count
+                        based cache
+  --prefix-cache-index {radix,hash}
+                        Prefix-cache lookup index: 'radix' (default, R15-P1)
+                        uses a token trie for O(prefix_len) lookups and
+                        surfaces dedup-bytes-saved on /metrics; 'hash' falls
+                        back to the legacy bisect-over-sorted-keys path.
+  --mllm-singleton-fastpath {auto,off}
+                        Serialized MLLM lane cache handling (default: auto).
+                        'auto' skips repacking a single eligible request's
+                        cache leaves into batched form (structural B=1 batches
+                        on the serialized hybrid lane only; dense lanes keep
+                        the merge); 'off' always takes the legacy
+                        merge/rebatch path. Operator rollback for the
+                        singleton fast path.
+  --mllm-media-prefix-cache {auto,off}
+                        Prior-turn media boundary reuse on the serialized MLLM
+                        lane (default: auto). 'auto' snapshots each eligible
+                        media prefill's stable turn boundary and resumes it
+                        when the next turn verifies as a strict token prefix;
+                        'off' disables store and lookup and keeps the cold
+                        image path. Operator rollback for the media boundary
+                        cache.
+  --kv-cache-dtype {bf16,int8,int4}
+                        KV cache dtype (R15 #300, default: bf16). int8/int4
+                        shrink the KV cache 2x/4x for memory-constrained
+                        hosts, but the live-cache dequant-on-read costs
+                        O(context) per decode step — measured -27% (int4) /
+                        -36% (int8) at 16k context (#1853). An explicit
+                        int8/int4 on a sliding-window (Gemma 3/4, GPT-OSS) or
+                        MLA (DeepSeek V3+, Kimi K2.5) model is rejected before
+                        the server reports ready; only auto/profile-selected
+                        quantization downgrades to bf16. Use --reasoning for
+                        AIME / hard math.
+  --reasoning           Reasoning profile: pins --kv-cache-dtype to int8
+                        regardless of the dtype flag (sub-4-bit drops -20pt on
+                        AIME-class math for Qwen3 thinking variants).
+  --kv-cache-quantization
+                        [deprecated alias of --kv-cache-dtype int8] Quantize
+                        stored KV caches to reduce memory (8-bit by default).
+                        When both flags are passed, this one wins for
+                        backwards compatibility.
+  --kv-cache-quantization-bits {4,8}
+                        Bit width for KV cache quantization (default: 8)
+  --kv-cache-quantization-group-size KV_CACHE_QUANTIZATION_GROUP_SIZE
+                        Group size for KV cache quantization (default: 64)
+  --kv-cache-min-quantize-tokens KV_CACHE_MIN_QUANTIZE_TOKENS
+                        Minimum tokens for quantization to apply (default:
+                        256)
+  --kv-cache-turboquant [{v4,k8v4,none}]
+                        Enable TurboQuant KV-cache compression. ``v4``
+                        (default when the flag is bare) is V-only 3-4 bit
+                        Lloyd-Max with K in FP16; ``k8v4`` is the R15 Phase 4
+                        mix — K at 8-bit Walsh-Hadamard + V at 4-bit Lloyd-Max
+                        (~4.6x KV compression on dense models); ``none`` is
+                        the explicit off-switch — overrides the alias-driven
+                        ``turboquant_tier=k8v4_verified`` default so the
+                        operator can A/B the bare FP16 KV path. Experimental —
+                        mutually exclusive with --kv-cache-quantization.
+  --kv-cache-turboquant-bits {3,4}
+                        V-side bit width for TurboQuant (default: auto-select
+                        by head_dim — 3-bit for head_dim>=96, 4-bit for
+                        head_dim=64). Ignored when --kv-cache-turboquant=k8v4
+                        (V is pinned to 4-bit there).
+  --kv-cache-turboquant-group-size KV_CACHE_TURBOQUANT_GROUP_SIZE
+                        Group size for TurboQuant V-side quantization
+                        (default: 32)
+  --kv-disk-checkpoint-interval KV_DISK_CHECKPOINT_INTERVAL
+                        Token interval at which the scheduler snapshots KV
+                        state to ~/.cache/rapid-mlx/kv_checkpoints/ (R15
+                        #296). 0 (default) disables. Write-only today: no
+                        engine path reloads the snapshots yet, and each one
+                        blocks decode for O(context) — enable only for
+                        external tooling that consumes the files (#1853).
+                        Pairs with the RAPID_MLX_KV_CHECKPOINT_MAX_BYTES env
+                        var (default 20 GiB) for the oldest-first disk-cap
+                        eviction policy.
+  --stream-interval STREAM_INTERVAL
+                        Tokens to batch before streaming (1=smooth,
+                        higher=throughput)
+  --max-tokens MAX_TOKENS
+                        Default max tokens for generation (default: 32768)
+  --speculative-config SPECULATIVE_CONFIG
+                        vLLM-style speculative decoding JSON config. This
+                        frontend parses method/model/num_speculative_tokens
+                        now. DFlash ships in the base install and is available
+                        with '{"method":"dflash"}', DDTree with
+                        '{"method":"ddtree"}', and MTP with '{"method":"mtp","
+                        num_speculative_tokens":3,"disable_auto_k":false,"cont
+                        inuous_batching":false,"allow_dynamic_membership":fals
+                        e}'. Continuous self-MTP and dynamic membership are
+                        default-off. SuffixDecoding is an explicit, workload-
+                        specific flag for high prompt/output-overlap traffic
+                        and is available with
+                        '{"method":"suffix","num_speculative_tokens":8}'.
+  --gpu-memory-utilization GPU_MEMORY_UTILIZATION
+                        Fraction of device memory for the Metal allocation
+                        limit and admission cap (0.0-1.0). Default: auto — the
+                        budget is sized to the loaded model (measured weights
+                        + headroom, between 0.90 and 0.97 of the device
+                        working-set budget). Pass an explicit value only as an
+                        advanced override.
+  --resident-memory-limit-gb RESIDENT_MEMORY_LIMIT_GB
+                        Process-wide resident model ceiling in GiB. Loading
+                        another model evicts the least-recently-used idle
+                        unpinned model first. 0 disables the ceiling (default:
+                        0).
+  --resident-model-idle-ttl RESIDENT_MODEL_IDLE_TTL
+                        Evict idle unpinned secondary models after this many
+                        seconds. 0 disables idle eviction (default: 0).
+  --lazy-load           Bind the API endpoint without loading the configured
+                        model's weights; the first inference request loads and
+                        warms it.
+  --idle-unload-seconds IDLE_UNLOAD_SECONDS
+                        Release the configured primary model after this many
+                        idle seconds while keeping the API endpoint online. A
+                        later request reloads it. 0 disables primary idle
+                        unload (default: 0).
+  --use-paged-cache     Use paged KV cache for memory efficiency
+                        (experimental). Requires a model whose prompt cache is
+                        plain full-attention KV on every layer; startup fails
+                        with an actionable error for
+                        rotating/hybrid/recurrent/quantized cache layouts.
+  --paged-cache-block-size PAGED_CACHE_BLOCK_SIZE
+                        Tokens per cache block (default: 64)
+  --max-cache-blocks MAX_CACHE_BLOCKS
+                        Maximum number of cache blocks (default: 1000)
+  --enable-audio        Mount the ``/v1/audio/*`` routes even when the loaded
+                        model is text-only. Useful for side-car deployments
+                        that proxy audio requests to a separate process.
+                        Audio-capable models (kokoro / whisper / parakeet /
+                        chatterbox / vibevoice / voxcpm) auto-mount the routes
+                        — this flag is only needed on text-mode boots.
+  --prefill-step-size PREFILL_STEP_SIZE
+                        Chunk size for prompt prefill processing. Larger
+                        values use more memory but can improve prefill
+                        throughput. (default: 2048; bench-verified model
+                        profiles may recommend a smaller value unless
+                        explicitly set)
+  --vision-prefill-token-budget VISION_PREFILL_TOKEN_BUDGET
+                        Advanced: maximum prompt tokens per vision-bearing
+                        request. Defaults to 8192 for automatic profiles; an
+                        explicit --prefill-step-size preserves the legacy
+                        shared limit.
+  --vision-min-pixels VISION_MIN_PIXELS
+                        Minimum pixels used by dynamic-resolution VLM image
+                        processors. 0 keeps the model default (default: 0).
+  --vision-max-pixels VISION_MAX_PIXELS
+                        Maximum pixels used by dynamic-resolution VLM image
+                        processors. Lower values trade image detail for lower
+                        TTFT and memory. 0 keeps the model default (default:
+                        0).
+  --mcp-config MCP_CONFIG
+                        Path to MCP configuration file (JSON/YAML) for tool
+                        integration
+  --allow-unauthenticated-public
+                        Explicitly allow network serving without an API key
+                        (e.g. an authenticated proxy)
+  --api-key API_KEY     API key for authentication (if not set, falls back to
+                        the RAPID_MLX_API_KEY env var; if neither, no auth
+                        required)
+  --cors-origins ORIGIN [ORIGIN ...]
+                        Allowed CORS origins (default: cross-origin browser
+                        access disabled). Example: --cors-origins
+                        http://localhost:3000 https://myapp.com
+  --trusted-hosts HOST [HOST ...]
+                        Host-header allowlist (DNS-rebinding protection): only
+                        requests whose Host header matches one of these values
+                        are accepted; everything else gets 400. Default:
+                        localhost, 127.0.0.1, [::1], *.localhost. For
+                        LAN/proxy access set the expected hostname explicitly.
+                        Values replace defaults and may be space- or comma-
+                        separated. Example: --trusted-hosts localhost
+                        127.0.0.1 (also settable via RAPID_MLX_TRUSTED_HOSTS).
+  --rate-limit RATE_LIMIT
+                        Rate limit requests per minute per client (0 =
+                        disabled)
+  --max-request-bytes MAX_REQUEST_BYTES
+                        Maximum HTTP request body size in bytes (default: 8
+                        MiB = 8388608). Requests over this cap are rejected
+                        with HTTP 413 before JSON parsing or tokenization
+                        runs. 0 disables the cap. Falls back to the
+                        RAPID_MLX_MAX_REQUEST_BYTES env var if unset.
+  --max-prompt-tokens TOKENS
+                        Operational prompt-token admission ceiling. Requests
+                        above this limit are rejected with HTTP 400
+                        context_length_exceeded before prefill, even when the
+                        model supports a larger context window.
+  --context-length TOKENS
+                        Per-request context window (prompt plus output), up to
+                        the model's declared limit. Overrides the automatic
+                        memory estimate; an explicit --gpu-memory-utilization
+                        cap still applies.
+  --timeout TIMEOUT     Default request timeout in seconds (default: 1800 = 30
+                        min)
+  --enable-auto-tool-choice
+                        Enable auto tool choice for supported models. Use
+                        --tool-call-parser to specify which parser to use.
+  --tool-call-parser TOOL_CALL_PARSER
+                        Select the tool call parser for the model. Canonical
+                        options: auto (auto-detect), mistral,
+                        qwen/qwen3/qwen3_xml (reasoning models,
+                        <tool_call>JSON</tool_call> format),
+                        qwen3_coder/qwen3_coder_xml (Coder model,
+                        <function=NAME> XML format), llama/llama3/llama4,
+                        hermes/nous, deepseek/deepseek_v3/deepseek_v31,
+                        kimi/moonshot/kimi_k2, granite/granite3,
+                        nemotron/nemotron3, xlam, functionary/meetkai,
+                        glm47/glm4, minimax/minimax_m2, harmony/gpt-
+                        oss/gpt_oss, gemma4/gemma_4, seed_oss/seed. Run
+                        `python -c 'from rapid_mlx.tool_parsers import ToolPar
+                        serManager;print(sorted(ToolParserManager.tool_parsers
+                        ))'` for the live list. Required for --enable-auto-
+                        tool-choice.
+  --enable-tool-logits-bias
+                        Bias logits toward structural tool call tokens for
+                        faster generation. Only active when --tool-call-parser
+                        is also set. Currently supports minimax.
+  --reasoning-parser {gemma4,qwen3,hy_v3,hy3,k2_horizon,deepseek_r1,deepseek_r1_distill,deepseek_v4,vibethinker,glm4,glm5,gpt_oss,harmony,minimax,muse,ui_tars,cohere_command4,north}
+                        Enable reasoning content extraction with specified
+                        parser. Extracts <think>...</think> tags into
+                        reasoning_content field. Options: gemma4, qwen3,
+                        hy_v3, hy3, k2_horizon, deepseek_r1,
+                        deepseek_r1_distill, deepseek_v4, vibethinker, glm4,
+                        glm5, gpt_oss, harmony, minimax, muse, ui_tars,
+                        cohere_command4, north.
+  --default-reasoning-effort EFFORT
+                        OpenAI reasoning_effort applied to requests that send
+                        no reasoning knob (reasoning_effort /
+                        reasoning_max_tokens / enable_thinking /
+                        chat_template_kwargs.reasoning_effort). Translated
+                        exactly like a client value: a template that publishes
+                        its own effort levels (GLM-5.3, Qwen3.8) gets the
+                        nearest native level in the prompt, any other template
+                        gets the matching thinking-token cap. Use it for
+                        models whose template default is the most expensive
+                        level (GLM-5.3 renders 'Reasoning Effort: Max' unless
+                        told otherwise). Options: none, minimal, low, medium,
+                        high, xhigh.
+  --no-thinking         Disable reasoning/thinking parser even if auto-
+                        detected. Thinking tokens will appear as regular
+                        content. Useful for faster responses when chain-of-
+                        thought is not needed.
+  --no-tool-call-parser
+                        Force-disable tool-call parser auto-detection from the
+                        alias profile. Escape hatch (SOP §10) when
+                        AliasProfile's auto-selected parser misfires for a
+                        specific deployment. Mutually exclusive with --tool-
+                        call-parser.
+  --no-reasoning-parser
+                        Force-disable reasoning parser auto-detection from the
+                        alias profile. Distinct from --no-thinking (which also
+                        suppresses the chain-of-thought prompt template) —
+                        this flag ONLY skips the auto-config step. Mutually
+                        exclusive with --reasoning-parser.
+  --force-hybrid        Force-treat the model as a hybrid (linear-attention /
+                        Mamba) architecture even when AliasProfile says
+                        otherwise. Disables spec/suffix decode paths that are
+                        unsound on hybrids. Mutually exclusive with --no-
+                        hybrid.
+  --no-hybrid           Force-treat the model as non-hybrid (full attention)
+                        even when AliasProfile says it's hybrid. Use when the
+                        profile mis-labels your model and you want spec/suffix
+                        decode enabled. Mutually exclusive with --force-
+                        hybrid.
+  --force-spec-decode   Force-enable speculative-decode eligibility even when
+                        AliasProfile says the model doesn't support it. Risky
+                        on hybrid models — use only when you've verified the
+                        profile is wrong. Mutually exclusive with --no-spec-
+                        decode.
+  --no-spec-decode      Force-disable speculative-decode eligibility (suffix /
+                        MTP / DFlash / DDTree) even when AliasProfile says the
+                        model supports it. Mutually exclusive with --force-
+                        spec-decode.
+  --force-openai-harmony-streaming
+                        Force-on: construct HarmonyStreamingRouter even when
+                        the compat gate would reject. Use to debug a
+                        regression in the gate itself; production should leave
+                        this off. Mutually exclusive with --no-openai-harmony-
+                        streaming.
+  --no-openai-harmony-streaming
+                        Force-off: skip the HarmonyStreamingRouter upgrade and
+                        use the legacy custom harmony state machine even on
+                        matched-vocab gpt-oss tokenizers. Escape hatch for a
+                        hypothetical false positive in the compat gate.
+                        Mutually exclusive with --force-openai-harmony-
+                        streaming.
+  --gc-control          Enable Python GC pausing during generation to avoid
+                        latency spikes (default: enabled)
+  --no-gc-control       Disable GC control (allow normal Python GC during
+                        generation)
+  --pin-system-prompt   Auto-pin system prompt in prefix cache to prevent
+                        eviction under memory pressure
+  --relocate-mid-conversation-system
+                        Keep a mid-conversation system message at its position
+                        (folded into the next user turn) instead of hoisting
+                        it into the leading system block. Preserves the prefix
+                        cache for clients that inject reminders mid-session
+                        (Claude Code); OFF by default because the relocated
+                        text carries user authority rather than system
+                        authority.
+  --mllm                Force load model as multimodal (vision) even if name
+                        doesn't match auto-detection patterns. Also DISABLES
+                        automatic text-only fallbacks and alias-owned
+                        speculative-decoding defaults; an explicitly requested
+                        speculative decoder conflicts and is rejected. A
+                        vision-config checkpoint with no usable vision tower
+                        hard-fails instead of silently downgrading (#1187).
+  --no-mllm, --text-only
+                        Force load model as text-only LLM even when auto-
+                        detection would route it to the multimodal/VLM path.
+                        Escape hatch for incomplete vision-tower checkpoints
+                        (#393) and text-only forks of multimodal architectures
+                        whose config.json still declares vision_config.
+  --default-temperature DEFAULT_TEMPERATURE
+                        Override default temperature for all requests
+                        (default: use model default)
+  --default-top-p DEFAULT_TOP_P
+                        Override default top_p for all requests (default: use
+                        model default)
+  --default-top-k DEFAULT_TOP_K
+                        Override default top_k for all requests (default: use
+                        model default)
+  --default-min-p DEFAULT_MIN_P
+                        Override default min_p for all requests (default: use
+                        model default)
+  --default-repetition-penalty DEFAULT_REPETITION_PENALTY
+                        Override default repetition_penalty for all requests
+                        (default: use model default)
+  --default-presence-penalty DEFAULT_PRESENCE_PENALTY
+                        Override default presence_penalty for all requests
+                        (default: use model default)
+  --default-frequency-penalty DEFAULT_FREQUENCY_PENALTY
+                        Override default frequency_penalty for all requests
+                        (default: use model default)
+  --embedding-max-inputs EMBEDDING_MAX_INPUTS
+                        Maximum inputs per /v1/embeddings request (default:
+                        2048); larger requests return 400. 0 or negative
+                        disables the limit.
+  --embedding-model EMBEDDING_MODEL
+                        Pre-load an embedding model at startup (e.g. mlx-
+                        community/embeddinggemma-300m-6bit). Without a
+                        positional model, the server runs embeddings-only.
+                        Requires the [embeddings] extra. Install the optional
+                        runtime with: The Homebrew build cannot add Python
+                        optional extras in place. Switch to an isolated tool
+                        install with: brew uninstall rapid-mlx && uv tool
+                        install 'rapid-mlx[embeddings]==1.0.2'
+  --enable-local-search
+                        Enable local folder text search at /v1/local-search
+                        (no automatic model downloads).
+  --local-search-dir DIR
+                        Local-search index directory (default: rapid-mlx state
+                        directory / local-search).
+  --embedding-max-length TOKENS
+                        Max input length (tokens) for --embedding-model.
+                        'auto' (default) derives it from the model's declared
+                        maximum (config.max_position_embeddings, else
+                        tokenizer.model_max_length); or pass a positive
+                        integer to set a lower operational ceiling. Inputs
+                        above the effective limit are handled per --embedding-
+                        overflow-policy (never truncated silently).
+  --embedding-overflow-policy {truncate,error}
+                        How to handle embedding inputs longer than
+                        --embedding-max-length: 'truncate' (default) discards
+                        the tail but logs a warning and increments the
+                        rapid_mlx_embedding_truncations_total metric (never
+                        silent); 'error' rejects the request with a 400
+                        carrying the observed and allowed token counts.
+  --rerank-model RERANK_MODEL
+                        Pre-load a reranker for /v1/rerank at startup.
+                        Supported families: Qwen3-Reranker, BGE reranker v2
+                        Gemma, mxbai-rerank-v2, jina-reranker-v3 and XLM-
+                        RoBERTa cross-encoders such as BAAI/bge-reranker-v2-m3
+                        (needs the [embeddings] extra). Without a positional
+                        model, the server runs without a chat model.
+  --rerank-model-family {bge2,jina3,mxbai2,qwen3,roberta}
+                        Reranker family of --rerank-model when its name does
+                        not reveal it, e.g. a fine-tune or a renamed local
+                        copy: qwen3 (Qwen3-Reranker), bge2 (BGE reranker v2
+                        Gemma), mxbai2 (mxbai-rerank-v2), roberta (XLM-RoBERTa
+                        cross-encoders such as bge-reranker-v2-m3) or jina3
+                        (jina-reranker-v3 / v3.5). Default: detect from the
+                        model name and config.
+  --rerank-instruction TEXT
+                        Task description for /v1/rerank requests without an
+                        'instruction' field (default: the model family's own
+                        default). XLM-RoBERTa cross-encoders take no
+                        instruction.
+  --rerank-prompt TEXT  Judging prompt of the reranker, replacing the model
+                        family's own (Qwen3-Reranker, mxbai-rerank-v2 and
+                        jina-reranker-v3 only).
+  --rerank-max-documents N
+                        Maximum documents per /v1/rerank request (default:
+                        1000); larger requests always return 400. 0 or
+                        negative disables the limit.
+  --rerank-max-length TOKENS
+                        Max tokens per query/document pair for --rerank-model.
+                        'auto' (default) uses the model's default, capped at
+                        the model's maximum; a positive integer sets the limit
+                        explicitly, capped at the model's maximum. Longer
+                        pairs are handled per --rerank-overflow-policy.
+  --rerank-overflow-policy {truncate,error}
+                        How to handle per-document token length overflow:
+                        'truncate' (default) shortens the document and logs a
+                        warning; 'error' rejects the request with a 400.
+  --watchdog-ppid PID   Self-terminate when the parent with this PID dies
+                        (defeats orphan-sidecar after SIGKILL on the
+                        supervisor). Honors $RAPID_MLX_WATCHDOG_PPID as a
+                        fallback. Set to 0 / unset to disable.
+  --pflash {off,auto,always}
+                        Opt in to PFlash long-prompt prefill compression (off,
+                        auto, always). Default: off. Compression is lossy: it
+                        drops most of the middle of the prompt for a faster
+                        cold prefill. 'auto' compresses only prompts of at
+                        least --pflash-threshold tokens; 'always' compresses
+                        every eligible long prompt.
+  --pflash-threshold PFLASH_THRESHOLD
+                        Minimum prompt tokens before --pflash auto compresses
+                        (default: 32768).
+  --pflash-keep-ratio PFLASH_KEEP_RATIO
+                        Fraction of prompt tokens to keep when compressing.
+                        Unset lets the engine resolve it: a per-alias
+                        ``pflash_keep_ratio`` override if the alias pins one
+                        (e.g. 0.50 for a ternary arch), else the default 0.20
+                        (the bench-validated profile in PR #649: TTFT
+                        3.87x-8.5x, needle recall 5/5). An explicit value here
+                        always wins.
+  --pflash-min-keep-tokens PFLASH_MIN_KEEP_TOKENS
+                        Minimum tokens to keep when compressing (default:
+                        2048).
+  --pflash-sink-tokens PFLASH_SINK_TOKENS
+                        Leading prompt tokens always kept by PFlash (default:
+                        256). Counted inside the keep budget; compression is
+                        skipped if sink + tail leave no middle-token budget.
+  --pflash-tail-tokens PFLASH_TAIL_TOKENS
+                        Trailing prompt tokens always kept by PFlash (default:
+                        2048). Counted inside the keep budget; compression is
+                        skipped if sink + tail leave no middle-token budget.
+  --pflash-block-size PFLASH_BLOCK_SIZE
+                        Middle-token scoring block size (default: 128).
+  --pflash-query-window PFLASH_QUERY_WINDOW
+                        Trailing query window used to score middle blocks
+                        (default: 512).
+  --pflash-stride-blocks PFLASH_STRIDE_BLOCKS
+                        Keep every Nth middle block as an anchor during
+                        scoring (0 disables anchors, default: 8).
+  --pflash-include-tools
+                        Allow PFlash compression on prompts with tool
+                        definitions. By default tool prompts are skipped for
+                        tool-call reliability.
+  --pflash-threshold-basis {total,uncached}
+                        What --pflash auto compares to --pflash-threshold:
+                        'total' prompt tokens (default) or only the tokens NOT
+                        covered by a usable memory-aware prefix-cache entry
+                        ('uncached'), so warm sessions that grow past the
+                        threshold keep hitting the cache.
+
+First-time tips:
+  rapid-mlx models  lists what you can serve;
+  rapid-mlx recipe  recommends the best model for this Mac.

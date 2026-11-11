@@ -1,92 +1,82 @@
 # Rapid MLX UI
 
-A desktop app for managing rapid-mlx and chatting with local models downloaded from Hugging Face.
+A Rust desktop app for managing rapid-mlx, local Hugging Face models, and conversations on Apple Silicon Macs. Requirements and implementation progress are tracked with OpenSpec.
 
-The app will use **Rust**, provide a desktop **UI**, and use **OpenSpec** to define requirements and plan changes.
+## Development status
 
-## Status
+The repository now contains a two-crate Rust workspace, an egui/eframe desktop UI, SQLite persistence, runtime/model management, streaming chat, scoped OS tools, an MCP client, transcription, and system/usage monitoring. Automated checks cover protocol fixtures, temporary files, and combined MCP/chat persistence. Live text generation and cancellation were also checked with an already downloaded Qwen3.5 4B model. Real ASR inference, microphone permissions, and the complete native desktop walkthrough remain verification gates; see the [validation record](./docs/validation.md) and unchecked [project tasks](./openspec/changes/plan-rapid-mlx-desktop/tasks.md).
 
-This repository currently contains project documentation and an initialized OpenSpec workflow with Codex skills. The application, Rust workspace, and desktop UI framework have not been scaffolded yet. Features below describe the intended product, not functionality available today.
+## Build and run
 
-## Product scope
-
-### Manage rapid-mlx
-
-- Show whether rapid-mlx is available, running, and ready to serve requests.
-- Provide controls to configure, start, and stop the managed runtime.
-- Surface startup progress, runtime logs, and actionable errors in the UI.
-- Distinguish a runtime launched by the app from an existing external process.
-
-### Browse local models
-
-- Discover models already downloaded from Hugging Face, including models in configured local directories.
-- Show model identity, local location, and available metadata such as size and quantization.
-- Refresh discovery and select a compatible model for chat.
-- Explain missing files and incompatible models without deleting or modifying the user's model cache.
-
-### Chat with models
-
-- Provide a full chat interface with streamed responses, Markdown and code formatting, and cancellation.
-- Support composing messages, editing prompts, retrying responses, and showing generation errors.
-- Allow model selection and reasoning effort selection where the runtime and selected model support it.
-- Make unsupported settings explicit; never imply that a requested effort setting was applied when it was ignored.
-- Show the model and generation settings associated with a response.
-
-### Keep sessions
-
-- Create, list, reopen, rename, and delete persistent chat sessions.
-- Preserve message history, model selection, and generation settings across app restarts.
-- Keep session history locally by default.
-- Define how editing or retrying a message affects subsequent history before implementing those actions.
-
-### Show system and token statistics
-
-- Display system load, including CPU utilization, memory usage, and GPU utilization when available.
-- Show prompt and generated token counts, generation throughput, and response timing when available.
-- Provide per-response and per-session token totals, with clear definitions for accumulated usage.
-- Distinguish measured values, estimates, and unavailable metrics.
-- Keep monitoring responsive without interrupting chat or overloading the machine.
-
-## Engineering direction
-
-- **Rust:** application logic, rapid-mlx integration, persistence, and telemetry collection.
-- **Desktop UI:** model browser, runtime controls, chat, session history, and system statistics in one app.
-- **OpenSpec:** specifications and change planning for implementation work.
-- **Local data:** model discovery and session storage should work with local files; network operations must be explicit.
-
-The UI framework, initial operating-system targets, rapid-mlx integration interface, persistence format, and telemetry sources remain to be selected after verifying runtime capabilities. Any UI tooling that requires another language must be documented as an explicit architecture decision.
-
-## Development workflow
-
-1. Inspect the existing code and specifications relevant to a change.
-2. Use OpenSpec to capture observable behavior, acceptance criteria, design decisions, and implementation tasks for features and material behavior changes.
-3. Implement changes in small, reviewable steps, keeping UI and backend behavior aligned.
-4. Validate affected behavior with suitable checks and tests; visually verify UI changes when a runnable app is available.
-5. Update specifications and documentation to match the delivered behavior and archive completed changes through OpenSpec.
-
-### OpenSpec
-
-OpenSpec 1.17.0 is initialized with the `spec-driven` schema and the core workflow for Codex. Project constraints are in [openspec/config.yaml](./openspec/config.yaml), specifications belong in [openspec/specs/](./openspec/specs/), and active changes belong in [openspec/changes/](./openspec/changes/).
-
-With Node.js and npm available, run the CLI without a global installation:
+The current development target is **macOS 27 on Apple Silicon**, tested with **Rust 1.96.1**. An existing rapid-mlx **1.0.2** installation is required for managed inference; the app does not install it. See [runtime compatibility](./docs/compatibility.md) for source-backed support and limitations.
 
 ```sh
-npx --yes @fission-ai/openspec@1.17.0 list
-npx --yes @fission-ai/openspec@1.17.0 list --specs
+cargo run -p rapid-mlx-ui
+```
+
+The window opens without automatically starting a server, downloading models, recording audio, or connecting registered MCP servers. Configure the runtime executable and model locations in Settings, choose a local model revision, then Load or explicitly Connect to an external loopback server. External served models must be selected by their advertised identity.
+
+To inspect synthetic UI fixtures without writing application data or running real operations:
+
+```sh
+cargo run -p rapid-mlx-ui -- --demo
+```
+
+Create a local unsigned app bundle:
+
+```sh
+scripts/bundle.sh --debug
+# Or build the optimized bundle:
+scripts/bundle.sh
+```
+
+The bundle is created at `dist/Rapid MLX UI.app`. Public signing and distribution are outside this change. Bundle metadata includes a microphone usage explanation; audio recording starts only when the user presses Record.
+
+## Local application state
+
+All app-owned state is stored under **`~/.rapid-mlx-ui`**, independently of the working directory:
+
+- `state.sqlite3`: sessions, drafts, message branches, generation settings, usage, tool records, preferences, MCP registrations, and transcription jobs.
+- `audio/tmp` and `audio/retained`: temporary and explicitly retained app recordings.
+- `cache`, `logs`, `backups`, and role-specific runtime staging: bounded app-managed supporting files.
+
+An unwritable state root produces an error instead of switching storage locations. Credentials are kept in memory for the current app run or resolved from configured environment references. They are not stored in the state database. Existing shared Hugging Face model caches keep their configured locations.
+
+## Models and runtime
+
+The Models page separates **Available** catalog entries from **Pulled** local revisions, with search, task filters, and current/cached catalog timestamps. Discovery reads the configured cache plus additional local folders and does not download or modify models. Pull is explicit. Deleting a pulled model requires a fresh preview and confirmation of the complete repository/revision scope; loaded or active models cannot be removed. Session deletion never deletes weights.
+
+The app supervises separate chat and transcription roles, using `127.0.0.1` ports 8000 and 8001 by default, and serializes heavyweight inference. External connections also support numeric IPv6 loopback. Runtime ownership is explicit: shutdown stops app-owned children and disconnects from external servers. Model deletion requires external inference connections to be disconnected first because the app cannot enumerate their cache usage; disconnecting leaves those servers running. See [model management](./docs/models.md).
+
+## Conversations, tools, and MCP
+
+Chat supports streamed answer/reasoning presentation, Markdown and code copying, model selection, supported reasoning effort, system/sampling settings, stopping, retries, editing prompts as preserved branches, and durable session history. Unsupported or unverified optional settings stay unavailable. Interrupted requests and uncertain tool outcomes are not automatically replayed.
+
+Basic OS tools support directory listing, bounded file reads/search, file creation/writing, and explicitly granted commands. Configure a session working directory, filesystem access, mutation permissions, and allowed executable paths in OS tools. A command grant is execution authority, not an OS filesystem sandbox. Calls and results are retained with the conversation. See [chat and OS tools](./docs/chat-tools.md) and [session storage](./docs/storage.md).
+
+The app acts as an **MCP client**. Register local stdio commands or Streamable HTTP endpoints, connect explicitly, inspect discovery, and select tools for the current session. Registration state is local; credentials are references or current-run values. The app does not publish an MCP server. See [MCP setup and a synthetic test server](./docs/mcp.md).
+
+## Transcription and statistics
+
+Transcription uses an independently selected local speech-to-text model, with explicit model pull/load/unload/removal, or an explicitly connected loopback ASR service. Select the exact advertised model after connecting. Import validated WAV audio or record from the microphone, edit and save the transcript, then explicitly append or replace a chat draft. Inserting text does not send it. Raw recording retention is off by default. See [audio support and verification limits](./docs/audio.md).
+
+The statistics view distinguishes system CPU/memory, owned process usage, runtime-reported tokens, client timing, and unavailable measurements. GPU utilization is unavailable without a verified provider. Usage includes distinct model requests from retries and tool continuations; missing usage stays unknown. See [metric definitions](./docs/metrics.md).
+
+## Validation
+
+```sh
+cargo fmt --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
 npx --yes @fission-ai/openspec@1.17.0 validate --all --strict --no-interactive
 ```
 
-In Codex, invoke `$openspec-propose` with a feature description to start a change. The generated skills also cover explore, apply, update, sync, and archive workflows. Reload the agent session if newly generated skills are not discovered automatically.
+Tests do not require model weights or microphone access. The successful real stdio fixture test has an explicit example-build prerequisite documented in [the MCP guide](./docs/mcp.md).
 
-No feature changes or specifications have been created yet. Application build, run, and test instructions will be added when the corresponding tooling exists.
+## OpenSpec workflow
 
-See [AGENTS.md](./AGENTS.md) for repository instructions for coding agents.
+The active [proposal](./openspec/changes/plan-rapid-mlx-desktop/proposal.md), [design](./openspec/changes/plan-rapid-mlx-desktop/design.md), [acceptance specs](./openspec/changes/plan-rapid-mlx-desktop/specs/), and [tasks](./openspec/changes/plan-rapid-mlx-desktop/tasks.md) define the implementation. Main specs are populated when the completed change is archived.
 
-## Initial implementation milestones
+OpenSpec 1.17.0 uses the `spec-driven` schema with Codex skills. Invoke `$openspec-propose`, `$openspec-update-change`, or `$openspec-apply-change` for the relevant workflow. The CLI can run through `npx --yes @fission-ai/openspec@1.17.0` without a global installation.
 
-1. Verify rapid-mlx capabilities and document the desktop architecture through an OpenSpec change.
-2. Scaffold the Rust application and desktop UI.
-3. Implement runtime status and controls alongside local model discovery.
-4. Add streaming chat with model and supported effort selection.
-5. Persist and manage chat sessions.
-6. Add system monitoring and token statistics, then validate the complete desktop flow.
+See [AGENTS.md](./AGENTS.md) for agent instructions and [openspec/config.yaml](./openspec/config.yaml) for project constraints.

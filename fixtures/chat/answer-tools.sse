@@ -1,0 +1,14 @@
+: synthetic fixture, based on rapid-mlx 1.0.2 wire schema
+
+data: {"id":"chatcmpl-fixture","model":"local-test","choices":[{"index":0,"delta":{"reasoning_content":"考える"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-fixture","model":"local-test","choices":[{"index":0,"delta":{"content":"Hello 🌍"},"finish_reason":null}]}
+
+data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"os_read","arguments":"{\"path\":"}}]},"finish_reason":null}]}
+
+data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"file.txt\"}"}}]},"finish_reason":"tool_calls"}]}
+
+data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":8,"total_tokens":18,"completion_tokens_details":{"reasoning_tokens":3}}}
+
+data: [DONE]
+

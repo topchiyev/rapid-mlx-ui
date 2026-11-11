@@ -1,0 +1,16 @@
+rapid_mlx/first_run.py:53-67
+def _state_dir() -> Path:
+    """The ``~/.rapid-mlx/`` state dir (same one telemetry uses; see
+    ``telemetry/state.py::_default_telemetry_dir``). Kept independent of the
+    telemetry opt-in so the one-time chat tip fires even when telemetry is
+    disabled.
+
+    ``RAPID_MLX_STATE_DIR`` overrides the location — used by tests to isolate
+    the one-time marker from the real home dir, and available as an escape
+    hatch for sandboxed / read-only-home environments.
+    """
+    override = os.environ.get("RAPID_MLX_STATE_DIR")
+    if override:
+        return Path(override)
+    return Path.home() / ".rapid-mlx"
+

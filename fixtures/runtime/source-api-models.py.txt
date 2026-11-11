@@ -1,0 +1,88 @@
+api/models.py:540-605
+# desktop UI surfaces, kept here so SDK clients that learned it don't
+# 400. ``xhigh`` (#3043) is the ceiling Qwen3.8's chat template ships as
+# its default and Anthropic's ``output_config.effort`` already accepts;
+# without it an OpenAI-SDK client could never ask that model for the
+# level it advertises. Anthropic Claude's ``thinking.type`` enum is
+# intentionally NOT included — that's a different surface (the
+# Anthropic adapter handles its own translation).
+_VALID_REASONING_EFFORTS: tuple[str, ...] = (
+    "none",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+)
+
+#: Route-layer translation of the graded OpenAI ``reasoning_effort`` values
+#: into a concrete ``reasoning_max_tokens`` cap, applied by
+#: ``service.helpers.maybe_apply_reasoning_effort`` (issue #448). ``none`` is
+#: intentionally absent — it maps to ``enable_thinking=False`` (suppress the
+#: ``<think>`` segment entirely), NOT to a cap. The graded magnitudes reuse
+#: the Anthropic surface's ``ANTHROPIC_EFFORT_TO_REASONING_MAX_TOKENS`` tiers
+#: (low=512, medium=2048, high=8192) so the same effort name yields the same
+#: reasoning budget regardless of which API dialect it arrived on; ``minimal``
+#: (OpenAI-only, gpt-5 era) sits one tier below ``low`` and ``xhigh`` reuses
+#: the Anthropic 24000 tier. This table is the FALLBACK for templates that
+#: expose no native effort vocabulary; a template that validates
+#: ``reasoning_effort`` against a literal set (Qwen3.8) gets the graded value
+#: mapped onto that set instead — see
+#: ``utils.chat_template.detect_native_reasoning_effort_levels`` (#3043).
+#: Module-scoped so tests import + assert against the same table the helper
+#: uses.
+OPENAI_REASONING_EFFORT_TO_MAX_TOKENS: dict[str, int] = {
+    "minimal": 256,
+    "low": 512,
+    "medium": 2048,
+    "high": 8192,
+    "xhigh": 24000,
+}
+
+
+def _validate_reasoning_effort(v):
+    """Pin ``reasoning_effort`` to the OpenAI-spec closed set.
+
+    Accepts ``None`` (the field's default — no preference signalled)
+    unchanged. Any other shape (int, list, dict, ``True``/``False``,
+    case-variant strings, garbage strings) raises ``ValueError`` so
+    Pydantic surfaces a 400. The route layer is free to translate the
+    accepted string into a ``reasoning_max_tokens`` cap or a system-
+    prompt hint — that translation lives outside the schema layer.
+
+    Codex-pattern note: bool is a subclass of int, so the ``isinstance(v,
+    bool)`` check has to run BEFORE the string check (no risk here
+    because the string check is first in the chain). The error message
+    enumerates the legal set so SDK consumers see exactly what to send.
+    """
+    if v is None:
+        return None
+    if isinstance(v, str) and v in _VALID_REASONING_EFFORTS:
+        return v
+    raise ValueError(
+        "reasoning_effort must be one of "
+        f"{list(_VALID_REASONING_EFFORTS)} or null "
+        f"(got {type(v).__name__}={v!r})."
+    )
+
+
+api/models.py:1690-1708
+    reasoning_max_tokens: int | None = None
+    # R10-H5 (R9-H3 carry) — OpenAI ``reasoning_effort`` knob. Declared
+    # so Pydantic stops silently dropping it (sven r10-R1 + vlad r10-R1
+    # both confirmed every value 200'd because the field was undeclared).
+    # Validated against ``_VALID_REASONING_EFFORTS`` via the
+    # ``_validate_reasoning_effort_field`` validator below so int / list
+    # / null / case-variant / garbage strings produce a clean 400.
+    # The value is translated at the route layer by
+    # ``service.helpers.maybe_apply_reasoning_effort`` (issue #448):
+    # ``"none"`` → ``chat_template_kwargs.enable_thinking=False`` (suppress
+    # the ``<think>`` segment) and ``minimal/low/medium/high`` →
+    # ``reasoning_max_tokens`` via ``OPENAI_REASONING_EFFORT_TO_MAX_TOKENS``.
+    # An explicit ``enable_thinking`` / ``reasoning_max_tokens`` the client
+    # already set always wins over the effort translation. The schema-layer
+    # validation stays the hard surface so SDK clients see the contract
+    # round-trip even for surfaces that do not run the translation.
+    reasoning_effort: str | None = None
+    # Number of completions (only n=1 supported). F-155: the route used
+    # to reject ``n > 1`` only, so ``n=0`` / ``n=-1`` slipped through

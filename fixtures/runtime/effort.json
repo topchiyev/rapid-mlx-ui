@@ -1,0 +1,49 @@
+{
+  "schema_values": [
+    "none",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh"
+  ],
+  "thinking_template": {
+    "none": {
+      "chat_template_kwargs": {
+        "enable_thinking": false
+      }
+    },
+    "minimal": {
+      "reasoning_max_tokens": 256
+    },
+    "low": {
+      "reasoning_max_tokens": 512
+    },
+    "medium": {
+      "reasoning_max_tokens": 2048
+    },
+    "high": {
+      "reasoning_max_tokens": 8192
+    },
+    "xhigh": {
+      "reasoning_max_tokens": 24000
+    }
+  },
+  "qwen38_native_levels": [
+    "low",
+    "medium",
+    "xhigh"
+  ],
+  "qwen38_normalization": {
+    "minimal": "low",
+    "high": "xhigh"
+  },
+  "unknown_model": {
+    "enabled": false,
+    "reason": "Schema acceptance is not model support"
+  },
+  "nonthinking": {
+    "enabled": false,
+    "reason": "No verified thinking behavior"
+  }
+}

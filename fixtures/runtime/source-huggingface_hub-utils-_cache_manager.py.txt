@@ -1,0 +1,170 @@
+huggingface_hub/utils/_cache_manager.py:310-361
+        > files.
+
+        > [!WARNING]
+        > This method is irreversible. If executed, cached files are erased and must be
+        > downloaded again.
+        """
+        # Record shared targets before their repo symlinks are deleted; only those manifests are swept below.
+        shared_store_paths: set[Path] = set()
+        if self.cache_dir is not None and _shared_blobs.is_shared_blobs_dir(
+            _shared_blobs.shared_blobs_dir(self.cache_dir)
+        ):
+            blob_paths = set(self.blobs)
+            for repo_path in self.repos:
+                blobs_dir = repo_path / "blobs"
+                try:
+                    blob_paths.update(blobs_dir.iterdir())
+                except OSError:
+                    pass
+            for blob_path in blob_paths:
+                if store_path := _shared_blobs.shared_blob_target(blob_path, self.cache_dir):
+                    shared_store_paths.add(store_path)
+
+        # Deletion order matters. Blobs are deleted in last so that the user can't end
+        # up in a state where a `ref`` refers to a missing snapshot or a snapshot
+        # symlink refers to a deleted blob.
+
+        # Unlink snapshot entries first: if it fails, their blobs must not be deleted.
+        for path in self.files:
+            path.unlink(missing_ok=True)
+
+        # Delete entire repos
+        for path in self.repos:
+            _try_delete_path(path, path_type="repo")
+
+        # Delete snapshot directories
+        for path in self.snapshots:
+            _try_delete_path(path, path_type="snapshot")
+
+        # Delete refs files
+        for path in self.refs:
+            _try_delete_path(path, path_type="ref")
+
+        # Delete blob files
+        for path in self.blobs:
+            _try_delete_path(path, path_type="blob")
+
+        # Manifest entries are validated against the filesystem; failures leak data rather than delete it.
+        if self.cache_dir is not None:
+            for store_path in shared_store_paths:
+                _shared_blobs.sweep_shared_blob(store_path, cache_dir=self.cache_dir)
+
+        logger.info(f"Cache deletion done. Saved {self.expected_freed_size_str}.")
+
+huggingface_hub/utils/_cache_manager.py:433-547
+    def delete_revisions(self, *revisions: str) -> DeleteCacheStrategy:
+        """Prepare the strategy to delete one or more revisions cached locally.
+
+        Input revisions can be any revision hash. If a revision hash is not found in the
+        local cache, a warning is thrown but no error is raised. Revisions can be from
+        different cached repos since hashes are unique across repos,
+
+        Examples:
+        ```py
+        >>> from huggingface_hub import scan_cache_dir
+        >>> cache_info = scan_cache_dir()
+        >>> delete_strategy = cache_info.delete_revisions(
+        ...     "81fd1d6e7847c99f5862c9fb81387956d99ec7aa"
+        ... )
+        >>> print(f"Will free {delete_strategy.expected_freed_size_str}.")
+        Will free 7.9K.
+        >>> delete_strategy.execute()
+        Cache deletion done. Saved 7.9K.
+        ```
+
+        ```py
+        >>> from huggingface_hub import scan_cache_dir
+        >>> scan_cache_dir().delete_revisions(
+        ...     "81fd1d6e7847c99f5862c9fb81387956d99ec7aa",
+        ...     "e2983b237dccf3ab4937c97fa717319a9ca1a96d",
+        ...     "6c0e6080953db56375760c0471a8c5f2929baf11",
+        ... ).execute()
+        Cache deletion done. Saved 8.6G.
+        ```
+
+        > [!WARNING]
+        > `delete_revisions` returns a [`~utils.DeleteCacheStrategy`] object that needs to
+        > be executed. The [`~utils.DeleteCacheStrategy`] is not meant to be modified but
+        > allows having a dry run before actually executing the deletion.
+        """
+        hashes_to_delete: set[str] = set(revisions)
+
+        repos_with_revisions: dict[CachedRepoInfo, set[CachedRevisionInfo]] = defaultdict(set)
+
+        for repo in self.repos:
+            for revision in repo.revisions:
+                if revision.commit_hash in hashes_to_delete:
+                    repos_with_revisions[repo].add(revision)
+                    hashes_to_delete.remove(revision.commit_hash)
+
+        if len(hashes_to_delete) > 0:
+            logger.warning(f"Revision(s) not found - cannot delete them: {', '.join(hashes_to_delete)}")
+
+        delete_strategy_blobs: set[Path] = set()
+        delete_strategy_refs: set[Path] = set()
+        delete_strategy_repos: set[Path] = set()
+        delete_strategy_snapshots: set[Path] = set()
+
+        # Blob entries the strategy will unlink (path -> scanned size).
+        blobs_to_unlink: dict[Path, int] = {}
+
+        for affected_repo, revisions_to_delete in repos_with_revisions.items():
+            other_revisions = affected_repo.revisions - revisions_to_delete
+
+            # If no other revisions, it means all revisions are deleted
+            # -> delete the entire cached repo
+            if len(other_revisions) == 0:
+                delete_strategy_repos.add(affected_repo.repo_path)
+                for revision in affected_repo.revisions:
+                    for file in revision.files:
+                        blobs_to_unlink[file.blob_path] = file.size_on_disk
+                continue
+
+            # Some revisions of the repo will be deleted but not all. We need to filter
+            # which blob files will not be linked anymore.
+            for revision_to_delete in revisions_to_delete:
+                # Snapshot dir
+                delete_strategy_snapshots.add(revision_to_delete.snapshot_path)
+
+                # Refs dir
+                for ref in revision_to_delete.refs:
+                    delete_strategy_refs.add(affected_repo.repo_path / "refs" / ref)
+
+                # Blobs dir
+                for file in revision_to_delete.files:
+                    # Some files are not symlinks to the blobs dir: files copied instead of symlinked
+                    # (Windows, filesystems without symlink support) or files created by the user
+                    # inside the snapshot dir (e.g. build artifacts from a `pip install`). They are
+                    # already removed when deleting the snapshot dir -> count them but don't delete
+                    # them a second time.
+                    if revision_to_delete.snapshot_path in file.blob_path.parents:
+                        blobs_to_unlink[file.blob_path] = file.size_on_disk
+                        continue
+
+                    if file.blob_path not in delete_strategy_blobs:
+                        is_file_alone = True
+                        for revision in other_revisions:
+                            for rev_file in revision.files:
+                                if file.blob_path == rev_file.blob_path:
+                                    is_file_alone = False
+                                    break
+                            if not is_file_alone:
+                                break
+
+                        # Blob file not referenced by remaining revisions -> delete
+                        if is_file_alone:
+                            delete_strategy_blobs.add(file.blob_path)
+                            blobs_to_unlink[file.blob_path] = file.size_on_disk
+
+        # Return the strategy instead of executing it.
+        return DeleteCacheStrategy(
+            blobs=frozenset(delete_strategy_blobs),
+            refs=frozenset(delete_strategy_refs),
+            repos=frozenset(delete_strategy_repos),
+            snapshots=frozenset(delete_strategy_snapshots),
+            expected_freed_size=_expected_freed_size(blobs_to_unlink, self.cache_dir),
+            cache_dir=self.cache_dir,
+        )
+
+    def delete_files(self, *files: CachedFileInfo) -> DeleteCacheStrategy:

@@ -1,0 +1,17 @@
+{
+  "repository": "fixture/chat",
+  "cache_root": "/synthetic/hub",
+  "revisions": [
+    "aaaaaaaa",
+    "bbbbbbbb"
+  ],
+  "estimated_reclaimable_bytes": null,
+  "command": [
+    "rm",
+    "fixture/chat",
+    "--yes"
+  ],
+  "scope": "all model repository revisions; no datasets/spaces, sessions or source directories",
+  "shared_blob_policy": "huggingface_hub scan_cache_dir delete_revisions strategy",
+  "confirmation_required": true
+}

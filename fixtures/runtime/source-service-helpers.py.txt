@@ -1,0 +1,137 @@
+service/helpers.py:1975-2110
+def maybe_apply_reasoning_effort(request, *, chat_template=None) -> bool:
+    """Translate the OpenAI ``reasoning_effort`` knob into rapid-mlx's
+    native reasoning controls at the route layer (issue #448, #3043).
+
+    The schema layer (``_validate_reasoning_effort_field`` on
+    ``ChatCompletionRequest`` / ``ResponsesRequest``) only *validates*
+    ``reasoning_effort`` against the OpenAI-spec closed set
+    (``none / minimal / low / medium / high``) — it deliberately does NOT
+    translate, so garbage 400s at parse time without the schema depending
+    on engine internals. This helper is that translation, run once per
+    request from the chat / responses routes:
+
+      * ``reasoning_effort="none"`` → merge
+        ``chat_template_kwargs={"enable_thinking": False}`` so a hybrid-
+        thinking model (qwen3, glm4, deepseek_r1, …) stops emitting a
+        ``<think>`` segment. This is the load-bearing fix for #448: an
+        agent built against the OpenAI spec that passed
+        ``reasoning_effort="none"`` for concise answers previously got
+        reasoning anyway and blew ``max_tokens`` mid-think, leaving no
+        answer in ``content``. Suppressing the
+        reasoning at the source means the truncation scenario never arises.
+      * graded ``reasoning_effort`` on a template that publishes its own
+        effort vocabulary (Qwen3.8 validates ``reasoning_effort`` against
+        ``('xhigh', 'medium', 'low')``) → merge the nearest native level into
+        ``chat_template_kwargs["reasoning_effort"]`` so the *prompt* carries
+        the request (``low`` → "keep your thinking brief", ``high`` →
+        ``xhigh``). No token cap is layered on top: before #3043 a
+        ``low`` request rendered the template's ``xhigh`` instruction and
+        was then force-closed at 512 thinking tokens — the instruction and
+        the budget contradicted each other. ``chat_template`` is the served
+        template (see :func:`served_chat_template`); pass ``None`` and this
+        branch is skipped.
+      * graded ``reasoning_effort`` on any other template → set
+        ``request.reasoning_max_tokens`` to the matching tier from
+        ``OPENAI_REASONING_EFFORT_TO_MAX_TOKENS`` (a subtractive cap on how
+        long the model may think before answering).
+
+    Precedence — for each path the client's explicit, more-specific native
+    knob on the SAME dimension wins (mirrors
+    ``maybe_auto_disable_thinking_for_tools``):
+
+      * ``none`` controls the on/off dimension, so it yields to an explicit
+        ``enable_thinking`` preference (top-level field or
+        ``chat_template_kwargs``) — ``enable_thinking=true`` alongside
+        ``reasoning_effort="none"`` is contradictory and the native field
+        wins. A ``reasoning_max_tokens`` cap is orthogonal to ``none``:
+        thinking-off makes the cap moot, so ``none`` still applies (it does
+        NOT yield to a cap).
+      * the native-level path controls the prompt dimension, so it yields
+        to an explicit ``chat_template_kwargs.reasoning_effort`` and does
+        not touch ``enable_thinking`` or ``reasoning_max_tokens``.
+      * the graded cap path controls the budget dimension, so it yields to
+        an explicit ``reasoning_max_tokens`` cap and does not touch
+        ``enable_thinking``.
+
+    MUST run BEFORE ``maybe_auto_disable_thinking_for_tools`` so a
+    ``reasoning_effort="none"`` request registers its ``enable_thinking``
+    preference first and the tool auto-disable then no-ops on it — one
+    resolved source of truth for the engine kwarg.
+
+    Returns ``True`` iff a translation was applied (for the route's
+    structured log line); ``False`` when ``reasoning_effort`` is unset or
+    the client's explicit knob took precedence.
+    """
+    effort = getattr(request, "reasoning_effort", None)
+    if not effort:
+        return False
+
+    if effort == "none":
+        # Only inject when the client did not pin thinking explicitly —
+        # the native ``enable_thinking`` field/kwarg wins a conflict.
+        if _extract_thinking_from_request(request) is not None:
+            return False
+        ctk = getattr(request, "chat_template_kwargs", None)
+        merged_ctk = dict(ctk) if isinstance(ctk, dict) else {}
+        merged_ctk["enable_thinking"] = False
+        request.chat_template_kwargs = merged_ctk
+        # The flag was server-injected (client set ``reasoning_effort``,
+        # not ``chat_template_kwargs.enable_thinking``), so suppress the
+        # L-05 warning header the same way the auto-disable family does.
+        _mark_thinking_auto_disabled(request)
+        return True
+
+    # Graded effort on a template with a native effort vocabulary → the
+    # nearest native level travels in ``chat_template_kwargs`` (#3043).
+    # ``enable_thinking`` / ``tools`` are server-resolved keys the renderer
+    # never lets a client override, so merging only ``reasoning_effort``
+    # here cannot clobber anything the route resolves later.
+    levels = (
+        detect_native_reasoning_effort_levels(
+            chat_template, tools=getattr(request, "tools", None)
+        )
+        if chat_template
+        else None
+    )
+    if levels:
+        native = map_reasoning_effort_to_native(effort, levels)
+        if native is not None:
+            ctk = getattr(request, "chat_template_kwargs", None)
+            merged_ctk = dict(ctk) if isinstance(ctk, dict) else {}
+            if "reasoning_effort" in merged_ctk:
+                # The client already drives the template variable directly
+                # (#2474 passthrough) — same dimension, the explicit value
+                # wins and no cap is layered on top.
+                return False
+            merged_ctk["reasoning_effort"] = native
+            request.chat_template_kwargs = merged_ctk
+            return True
+
+    # Graded effort (minimal/low/medium/high/xhigh) → ``reasoning_max_tokens``
+    # tier (a subtractive cap on how long the model may think), unless the
+    # client already set an explicit cap (which wins). Graded effort does
+    # NOT force ``enable_thinking`` on — it is itself a reasoning-intent
+    # signal that the tool / casual-chat auto-disable gates recognize (via
+    # ``_client_signalled_reasoning_intent``) and step aside for, so a
+    # thinking-capable model keeps its template-default reasoning instead
+    # of being silently turned off on tool calls (codex #1009 r1 MAJOR).
+    if getattr(request, "reasoning_max_tokens", None) is not None:
+        return False
+    cap = OPENAI_REASONING_EFFORT_TO_MAX_TOKENS.get(effort)
+    if cap is None:
+        return False
+    request.reasoning_max_tokens = cap
+    return True
+
+
+def maybe_auto_disable_thinking_for_casual_chat(request, *, extra_signals=None) -> bool:
+    """R12-T2F-276: auto-disable ``enable_thinking`` on a casual chat
+    completion to a thinking-capable model when the caller did not
+    pin a thinking preference or otherwise express explicit reasoning
+    intent. Third member of the auto-disable family — mirrors the
+    M-2 strict-json_schema gate (PR #877) and the R12-T1F tools gate
+    (PR #891), and shares the same merge contract / single source
+    of truth so chat / responses (and any future surface that adds
+    a thinking-capable path) inherit the fix for free.
+

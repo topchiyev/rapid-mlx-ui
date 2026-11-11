@@ -1,0 +1,138 @@
+routes/audio.py:212-216
+MAX_AUDIO_UPLOAD_SIZE = 25 * 1024 * 1024
+_REQUEST_BODY_SLACK_BYTES = 1024 * 1024  # 1 MB headroom for multipart overhead
+_AUDIO_READ_CHUNK_SIZE = 1024 * 1024  # 1 MB chunks
+
+# Audio engines (lazy loaded, module-level to persist across requests)
+
+routes/audio.py:518-550
+    local = resolve_audio_alias(getattr(cfg, "model_path", None))
+    if local is not None and local.type == "stt" and local.notes == "local folder":
+        return local.hf_id
+    for served in (
+        getattr(cfg, "model_alias", None),
+        getattr(cfg, "model_name", None),
+        getattr(cfg, "model_path", None),
+    ):
+        entry = resolve_audio_alias(served)
+        if entry is not None and entry.type == "stt":
+            return entry.hf_id
+    return None
+
+
+def _served_local_request(model: str, kind: str) -> str | None:
+    from ..audio.registry import resolve_audio_alias
+    from ..config import get_config
+
+    cfg = get_config()
+    entry = None
+    if model in (getattr(cfg, "model_alias", None), getattr(cfg, "model_name", None)):
+        entry = resolve_audio_alias(getattr(cfg, "model_path", None))
+        if entry is not None and (entry.type != kind or entry.notes != "local folder"):
+            entry = None
+    if entry is None:
+        entry = resolve_audio_alias(model)
+    if entry is not None and entry.type == kind and entry.notes == "local folder":
+        return entry.hf_id
+    return None
+
+
+def _resolve_audio_user_alias(model: str) -> str:
+    """Apply the validated user alias mapping shared with CLI resolution."""
+
+routes/audio.py:2641-2735
+@router.post("/v1/audio/transcriptions", dependencies=_AUDIO_POST_DEPENDENCIES)
+async def create_transcription(
+    request: Request,
+    file: UploadFile,
+    # ``model``, ``language``, ``response_format`` are sent as multipart
+    # form fields by OpenAI-compatible clients (the official Whisper
+    # API puts them in the ``multipart/form-data`` body). Pre-F-165
+    # this route declared them as plain ``str`` parameters, which
+    # FastAPI then resolves as query parameters — meaning a curl /
+    # OpenAI-SDK client putting them in the body silently fell back to
+    # the default ``whisper-large-v3`` and never reached
+    # ``_resolve_stt_model``. To repair the OpenAI contract WITHOUT
+    # breaking any pre-existing internal caller that still passes
+    # ``?model=...`` on the query string (codex-bundled review on the
+    # F-165 PR), accept both sources and prefer the form field when
+    # it is provided. ``...`` (Ellipsis) is *not* used as a default —
+    # leaving both unset still resolves to ``whisper-large-v3``.
+    model_form: str | None = Form(None, alias="model"),
+    language_form: str | None = Form(None, alias="language"),
+    response_format_form: str | None = Form(None, alias="response_format"),
+    # ``text`` is a rapid-mlx extension (NOT an OpenAI field) that turns
+    # this route into the forced-alignment surface: when present, the
+    # known transcript is aligned to the audio and per-character timings
+    # come back in the segment shape verbose_json/srt/vtt already render.
+    # ``model`` then defaults to :data:`DEFAULT_ALIGNER_ALIAS`. Accepted
+    # on both form and query for parity with the other STT fields.
+    text_form: str | None = Form(None, alias="text"),
+    # Proper nouns / hotwords biasing the decoder. Off-spec for OpenAI (whose
+    # Whisper API calls the equivalent ``prompt``), so it is accepted under a
+    # backend-neutral name and mapped to each family's own kwarg in STTEngine.
+    context_form: str | None = Form(None, alias="context"),
+    # STT-word-timestamps: OpenAI serialises the array field as
+    # ``timestamp_granularities[]`` (bracketed) in the multipart body.
+    # We also accept the un-bracketed ``timestamp_granularities`` name
+    # (some SDK/curl variants send it that way) and both spellings on the
+    # query string, mirroring the form-over-query precedence the rest of
+    # this route already uses for ``model``/``language``/``response_format``.
+    timestamp_granularities_bracket_form: list[str] | None = Form(
+        None, alias="timestamp_granularities[]"
+    ),
+    timestamp_granularities_plain_form: list[str] | None = Form(
+        None, alias="timestamp_granularities"
+    ),
+    model_query: str | None = Query(None, alias="model"),
+    language_query: str | None = Query(None, alias="language"),
+    response_format_query: str | None = Query(None, alias="response_format"),
+    text_query: str | None = Query(None, alias="text"),
+    timestamp_granularities_bracket_query: list[str] | None = Query(
+        None, alias="timestamp_granularities[]"
+    ),
+    timestamp_granularities_plain_query: list[str] | None = Query(
+        None, alias="timestamp_granularities"
+    ),
+):
+    """Transcribe audio to text (OpenAI Whisper API compatible).
+
+    Forced-alignment extension: if the request carries a ``text`` field,
+    the route aligns that KNOWN transcript to the uploaded audio
+    (per-character/word timestamps, zero recognition error) via
+    :meth:`STTEngine.align` instead of running ASR. When ``text`` is
+    present but ``model`` is omitted it defaults to the registered
+    aligner alias (:data:`DEFAULT_ALIGNER_ALIAS`), and the response
+    defaults to ``verbose_json`` so the timestamped ``segments`` are
+    actually in the body. When ``text`` is absent the behaviour is
+    unchanged.
+
+    Two-layer size guard (defense in depth):
+
+    1. :class:`AudioBodyLimitMiddleware` runs at the ASGI layer and
+       rejects requests whose ``Content-Length`` exceeds the cap
+       BEFORE Starlette's multipart parser drains the receive channel.
+       Honest large uploads die there with zero disk I/O and no
+       handler invocation.
+
+    2. ``_stream_upload_to_tempfile`` (below) enforces the exact per-
+       file cap while copying chunks into our own temp file. Catches
+       chunked-transfer / no-``Content-Length`` clients that lied at
+       layer 1: even if Starlette already spooled the body to its own
+       ``SpooledTemporaryFile``, we refuse to copy more than the cap
+       into ours and abort early before any STT engine import /
+       ``.load()`` call happens.
+
+    The 25 MB ceiling matches OpenAI's Whisper API and bounds the
+    worst-case STT inference cost.
+    """
+    from rapid_mlx.telemetry import inference as _telemetry_inference
+
+    caller_agent, caller_client = _telemetry_inference.request_caller_headers(request)
+    # Form wins over query when both are present (form is the OpenAI
+    # contract; query is the pre-F-165 internal contract we're keeping
+    # for back-compat). Defaults match the original signature.
+    #
+    # ``model_merged`` / ``response_format_provided`` record whether the
+    # caller explicitly supplied the field — they drive the alignment
+    # defaults below, which only kick in when the field was omitted.

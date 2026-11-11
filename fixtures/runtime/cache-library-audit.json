@@ -1,0 +1,8 @@
+{
+  "runtime": "1.0.2",
+  "kind": "synthetic temporary cache audit",
+  "full_repository_revisions_removed": 2,
+  "retained_shared_blob_readable": true,
+  "datasets_spaces_custom_source_and_session_preserved": true,
+  "expected_freed_bytes": 0
+}

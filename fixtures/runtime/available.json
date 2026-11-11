@@ -1,0 +1,38 @@
+{
+  "text": [
+    {
+      "alias": "fixture-chat",
+      "hf_path": "fixture/chat",
+      "modality": "text",
+      "standalone": true,
+      "size_bytes": 7,
+      "reasoning_parser": "qwen3",
+      "tool_call_parser": "qwen3"
+    }
+  ],
+  "audio": [
+    {
+      "alias": "fixture-asr",
+      "hf_id": "fixture/asr",
+      "kind": "stt",
+      "family": "whisper",
+      "modality": "audio"
+    },
+    {
+      "alias": "fixture-tts",
+      "hf_id": "fixture/tts",
+      "kind": "tts",
+      "family": "kokoro",
+      "modality": "audio"
+    },
+    {
+      "alias": "fixture-aligner",
+      "hf_id": "fixture/aligner",
+      "kind": "stt",
+      "family": "qwen3_aligner",
+      "modality": "audio"
+    }
+  ],
+  "video": [],
+  "image": []
+}

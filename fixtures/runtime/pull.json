@@ -1,0 +1,10 @@
+{
+  "command": [
+    "pull",
+    "fixture/chat"
+  ],
+  "cache_env": "HF_HUB_CACHE",
+  "progress": "indeterminate bounded output",
+  "cancel": "owned child SIGTERM, wait, kill/reap fallback; incomplete cache is not ready",
+  "network": "explicit pull only"
+}

@@ -1,0 +1,166 @@
+routes/health.py:156-320
+@probe_router.get("/health")
+async def health():
+    """Health check endpoint.
+
+    `model_loaded` flips True as soon as the engine object exists
+    (mid-lifespan), but warmup + prefix-cache load can still be in
+    progress. `ready` flips True only after lifespan finishes all
+    startup work — that's the signal callers actually want to gate
+    on. Use /health/ready (returns 503 until ready) for poll-until-up
+    callers; this endpoint is the human-readable view.
+    """
+    cfg = get_config()
+
+    mcp_info = None
+    if cfg.mcp_manager is not None:
+        connected = sum(
+            1
+            for s in cfg.mcp_manager.get_server_status()
+            if s.state.value == "connected"
+        )
+        total = len(cfg.mcp_manager.get_server_status())
+        mcp_info = {
+            "enabled": True,
+            "servers_connected": connected,
+            "servers_total": total,
+            "tools_available": len(cfg.mcp_manager.get_all_tools()),
+        }
+
+    # The image-gen / video-gen lanes are thin adapters (``ImageEngine`` /
+    # ``VideoEngine``). Previously they did not implement the route-facing
+    # engine surface, so ``get_stats()`` / ``is_mllm`` raised ``AttributeError``
+    # and ``/health`` answered 500 for the whole life of an image/video serve
+    # (issue #1776) — including to container ``HEALTHCHECK``s and blackbox
+    # probes that poll it. The fix follows the #500 rule the route-engine
+    # contract enforces: the surface lives on the engines (both adapters now
+    # define ``get_stats`` + ``is_mllm``), so the route calls it unconditionally
+    # rather than hasattr-guarding. ``model_type`` is classified from the
+    # capability flags; ``getattr`` defaults keep a not-yet-loaded engine and
+    # any future lane from tripping the handler.
+    engine = cfg.engine
+    engine_stats = engine.get_stats() if engine is not None else {}
+    primary_lifecycle = cfg.primary_model_lifecycle
+    primary_status = (
+        primary_lifecycle.snapshot() if primary_lifecycle is not None else None
+    )
+    model_loaded = (
+        bool(primary_status["model_loaded"])
+        if primary_status is not None
+        else cfg.model_loaded
+    )
+    switching = primary_switching()
+
+    if getattr(engine, "is_image_gen", False):
+        model_type = "image-gen"
+    elif getattr(engine, "is_video_gen", False):
+        model_type = "video-gen"
+    elif getattr(engine, "is_mllm", False):
+        model_type = "mllm"
+    elif cfg.retrieval_only:
+        model_type = "+".join(
+            kind
+            for kind, lane in (
+                ("embedding", cfg.embedding_engine),
+                ("rerank", cfg.rerank_engine),
+            )
+            if lane is not None
+        )
+    elif engine is None:
+        model_type = "llm"
+        from ..audio.registry import resolve_audio_alias
+
+        entry = next(
+            (
+                entry
+                for name in (cfg.model_alias, cfg.model_name, cfg.model_path)
+                if (entry := resolve_audio_alias(name)) is not None
+            ),
+            None,
+        )
+        if entry is not None and entry.type in ("stt", "tts"):
+            model_type = entry.type
+    else:
+        model_type = "llm"
+
+    model_name = cfg.model_name
+    retrieval_models = retrieval_model_ids(cfg)
+    if retrieval_models:
+        model_name = retrieval_models[0]
+
+    consent_blocker = _model_consent_blocker(cfg)
+    return {
+        **update_refresh.snapshot(),
+        "status": "healthy",
+        "ready": cfg.ready and not switching and not consent_blocker,
+        **consent_blocker,
+        "state": (
+            "switching"
+            if switching
+            else "blocked"
+            if consent_blocker
+            else primary_status["state"]
+            if primary_status is not None
+            else "ready"
+            if cfg.ready
+            else "loading"
+        ),
+        "model_loaded": model_loaded,
+        "model_name": model_name,
+        **({"models": retrieval_models} if retrieval_models is not None else {}),
+        "model_type": model_type,
+        "engine_type": engine_stats.get(
+            "engine_type",
+            "audio" if engine is None and model_type in ("stt", "tts") else "unknown",
+        ),
+        "mcp": mcp_info,
+        "model_lifecycle": primary_status,
+    }
+
+
+@probe_router.get("/health/ready")
+async def health_ready():
+    """Strict readiness probe — 503 until lifespan startup is fully done.
+
+    Lifespan order is: engine.start() → warmup (Metal kernel JIT) →
+    load_from_disk (prefix cache) → MCP init → set ready=True. The
+    first inference request would otherwise compete with warmup +
+    cache load and look like a hang. Validation pipelines and
+    container orchestrators should poll this instead of /v1/models
+    (which returns 200 the moment the FastAPI app binds).
+    """
+    cfg = get_config()
+    if primary_switching():
+        raise ModelSwitchingError()
+    consent_blocker = _model_consent_blocker(cfg)
+    if consent_blocker:
+        return JSONResponse(
+            status_code=503, content={"ready": False, **consent_blocker}
+        )
+    if not cfg.ready:
+        import json
+
+        from ..middleware.exception_handlers import _http_error_response
+        from ..startup_progress import startup_progress
+
+        # Keep the standard error envelope; progress fields ride alongside it.
+        base = _http_error_response(
+            HTTPException(status_code=503, detail="model loading")
+        )
+        content = json.loads(bytes(base.body))
+        content.update(ready=False, **startup_progress.snapshot())
+        return JSONResponse(status_code=503, content=content)
+    lifecycle = cfg.primary_model_lifecycle
+    status = lifecycle.snapshot() if lifecycle is not None else None
+    if status is not None and status["state"] == "error":
+        raise HTTPException(status_code=503, detail="model lifecycle error")
+    retrieval_models = retrieval_model_ids(cfg)
+    return {
+        "ready": True,
+        "model": retrieval_models[0] if retrieval_models else cfg.model_name,
+        "state": status["state"] if status is not None else "ready",
+        "model_loaded": (
+            bool(status["model_loaded"]) if status is not None else cfg.model_loaded
+        ),
+    }
+

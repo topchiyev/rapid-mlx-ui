@@ -1,0 +1,14 @@
+{
+  "model": "fixture-chat",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Fixture prompt"
+    }
+  ],
+  "stream": true,
+  "stream_options": {
+    "include_usage": true
+  },
+  "reasoning_effort": "low"
+}

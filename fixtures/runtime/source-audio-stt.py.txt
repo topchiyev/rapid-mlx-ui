@@ -1,0 +1,32 @@
+audio/stt.py:250-280
+# succeeds first and ``_processor`` is already non-None on entry to
+# the patch helper below.
+_DEFAULT_WHISPER_PROCESSOR_FALLBACK = "openai/whisper-large-v3"
+
+
+def _load_local_whisper_processor(transformers_module, source, revision_kwargs):
+    """Load cached processor parts if the full loader needs missing metadata."""
+    try:
+        return transformers_module.WhisperProcessor.from_pretrained(
+            source, local_files_only=True, **revision_kwargs
+        )
+    except OSError:
+        extractor_class = getattr(transformers_module, "WhisperFeatureExtractor", None)
+        fast_tokenizer = getattr(transformers_module, "WhisperTokenizerFast", None)
+        slow_tokenizer = getattr(transformers_module, "WhisperTokenizer", None)
+        tokenizer_class = fast_tokenizer or slow_tokenizer
+        if extractor_class is None or tokenizer_class is None:
+            raise
+        try:
+            feature_extractor = extractor_class.from_pretrained(
+                source, local_files_only=True, **revision_kwargs
+            )
+            try:
+                tokenizer = tokenizer_class.from_pretrained(
+                    source, local_files_only=True, **revision_kwargs
+                )
+            except Exception:  # noqa: BLE001
+                if fast_tokenizer is None or slow_tokenizer is None:
+                    raise
+                tokenizer = slow_tokenizer.from_pretrained(
+                    source, local_files_only=True, **revision_kwargs

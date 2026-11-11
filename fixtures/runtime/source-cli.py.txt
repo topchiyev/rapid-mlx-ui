@@ -1,0 +1,367 @@
+cli.py:11176-11330
+def _cached_models_json_payload() -> dict:
+    """Structured form of the ``models --cached`` view — the same rows the
+    text table renders, with stable keys instead of fixed-width columns.
+    Also retain certified external collision fallbacks with explicit paths.
+
+    Sizes are raw bytes; ``subfolder`` is the exact catalog checkpoint folder
+    for mapped aliases (``None`` means repository root); ``state`` is one of
+    ``ok`` / ``unmapped`` /
+    ``incomplete`` / ``external`` mirroring the alias column's parenthesized
+    tags; ``alias`` is ``None`` for any non-``ok`` row (those are not
+    launchable by alias). Sorted biggest-first, like the table. ``chat_ready``
+    is the shared discovery verdict for a root checkpoint addressable by this
+    row's repo/alias, including memory fit. Unjudged artifacts have a null
+    verdict; false rejects a judged root. Neither is positive chat evidence.
+    The optional chat fit/native fields let Desktop rank uncataloged choices
+    without repeating checkpoint inspection or guessing size from repo names.
+    """
+    import time as _time
+
+    from rapid_mlx.local_models import discover_runnable_chat_models
+    from rapid_mlx.model_aliases import (
+        cached_repository_collides,
+        draft_only_conflict,
+        resolve_subfolder,
+    )
+
+    chat_models = {
+        (
+            model.repo,
+            model.external,
+            resolve_subfolder(model.alias) if model.alias else None,
+        ): model
+        for model in discover_runnable_chat_models()
+        # Ordinary rows launch by repo; collision rows carry an explicit path.
+        # Other shadowed external copies cannot supply a repo launch verdict.
+        if model.model in (model.repo, model.alias)
+        or (model.alias is None and cached_repository_collides(model.repo))
+    }
+    rows = _scan_hf_cache_models()
+    external_rows = _scan_external_model_dirs()
+    runnable_hub_repos = {
+        repo for repo, _, _ in rows if _cached_repository_is_runnable(repo)
+    }
+
+    profiles = _cached_catalog_profiles()
+    representative_subfolders: dict[str, str | None] = {}
+    repo_artifacts: dict[str, list[tuple[str, str | None]]] = {}
+    for alias, p in profiles.items():
+        representative_subfolders.setdefault(p.hf_path, p.subfolder)
+        artifact = (alias, p.subfolder)
+        if artifact not in repo_artifacts.setdefault(p.hf_path, []):
+            repo_artifacts[p.hf_path].append(artifact)
+
+    now = _time.time()
+    tagged = [(*row, False) for row in rows] + [(*row, True) for row in external_rows]
+    collision_paths = {
+        (model.repo, model.external): model.model
+        for model in chat_models.values()
+        if model.alias is None and cached_repository_collides(model.repo)
+    }
+    # Completeness is an inventory property, not chat certification. A
+    # rejected managed collision must not hide a certified external copy:
+    # its explicit path can launch independently of the managed snapshot.
+    tagged = [
+        row
+        for row in tagged
+        if not row[3]
+        or row[0] not in runnable_hub_repos
+        or (row[0], True) in collision_paths
+    ]
+    models = []
+    total_bytes = 0
+    for repo, size, mtime, is_external in tagged:
+        total_bytes += size
+        if is_external:
+            artifacts: list[tuple[str | None, str | None, int, str]] = [
+                (None, None, size, "external")
+            ]
+        else:
+            artifacts = []
+            seen_artifacts: set[tuple[str, str | None, str | None]] = set()
+            for alias, subfolder in repo_artifacts.get(repo, []):
+                revision = getattr(profiles[alias], "revision", None)
+                key = (repo, revision, subfolder)
+                # Subfolder completeness below resolves the exact alias pin.
+                # A second alias probe can reinterpret a colliding repo name.
+                if key in seen_artifacts:
+                    continue
+                if subfolder is None:
+                    # A root alias is runnable only when repo-level resolution
+                    # also means root. A multi-variant repo's current/default
+                    # subfolder must not masquerade as its root artifact.
+                    artifact_size = (
+                        size
+                        if resolve_subfolder(alias) is None
+                        and _cached_repository_is_runnable(repo)
+                        else None
+                    )
+                else:
+                    # The alias came from an exact repo match above. Do not
+                    # let a colliding repo name choose a different pin.
+                    artifact_size = (
+                        _cached_subfolder_size(repo, subfolder, catalog_alias=alias)
+                        if revision is not None or cached_repository_collides(repo)
+                        else _cached_subfolder_size(repo, subfolder)
+                    )
+                if artifact_size is not None:
+                    artifacts.append((alias, subfolder, artifact_size, "ok"))
+                    seen_artifacts.add(key)
+            if not artifacts:
+                state = (
+                    "unmapped" if _cached_repository_is_runnable(repo) else "incomplete"
+                )
+                artifacts = [(None, None, size, state)]
+
+        for alias, subfolder, artifact_size, state in artifacts:
+            chat = chat_models.get((repo, is_external, subfolder))
+            # Discovery judges repo-level resolution, not every sibling
+            # checkpoint in a multi-artifact catalog repository.
+            chat_ready = (
+                (chat is not None and state != "incomplete")
+                if subfolder is None and representative_subfolders.get(repo) is None
+                else None
+            )
+            models.append(
+                {
+                    "alias": alias,
+                    "standalone": draft_only_conflict(repo) is None,
+                    "launch_path": collision_paths.get((repo, is_external)),
+                    "repo": repo,
+                    "subfolder": subfolder,
+                    "size_bytes": int(artifact_size),
+                    "age_seconds": int(max(0, now - mtime))
+                    if mtime and mtime > 0
+                    else None,
+                    "state": state,
+                    "external": is_external,
+                    "modified_epoch": int(mtime) if mtime and mtime > 0 else None,
+                    "chat_ready": chat_ready,
+                    "chat_fit": chat.fit if chat is not None and chat_ready else None,
+                    "chat_mlx_native": chat.mlx_native
+                    if chat is not None and chat_ready
+                    else None,
+                }
+            )
+    models.sort(key=lambda m: -m["size_bytes"])
+    return {"cached": models, "count": len(models), "total_bytes": int(total_bytes)}
+
+
+def _video_alias_runtime_ready(model_name: str) -> bool:
+    """Whether a video alias can run here, per the shared runtime preflight."""
+    from rapid_mlx.runtime.video_lane import video_alias_runtime_ready
+
+    return video_alias_runtime_ready(model_name)
+
+
+cli.py:11330-11455
+
+
+def _available_models_json_payload() -> dict:
+    """Structured form of the default ``models`` view: every alias with the
+    profile facts the table shows, split by modality (text / audio / video /
+    image) exactly as the text sections are. Sizes are download bytes from the
+    checked-in manifest (``None`` when unknown); no per-invocation HF I/O.
+    """
+    from rapid_mlx.model_aliases import (
+        draft_only_conflict,
+        list_builtin_aliases,
+        list_profiles,
+    )
+    from rapid_mlx.model_sizes import size_bytes
+
+    all_profiles = list_profiles()
+    builtin_aliases = set(list_builtin_aliases())
+
+    def _modality(p) -> str:
+        return getattr(p, "modality", "text") or "text"
+
+    def _profile_dict(alias, p) -> dict:
+        raw = None
+        try:
+            raw = size_bytes(p.hf_path)
+        except Exception:
+            raw = None  # pragma: no cover - defensive
+        modality = _modality(p)
+        default_steps = None
+        if modality == "image-gen":
+            from rapid_mlx.image.engine import default_steps_for_model
+
+            default_steps = default_steps_for_model(p.hf_path)
+        return {
+            "alias": alias,
+            "standalone": draft_only_conflict(p.hf_path) is None,
+            "hf_path": p.hf_path,
+            **({"revision": p.revision} if p.revision is not None else {}),
+            "size_bytes": int(raw) if isinstance(raw, int) and raw > 0 else None,
+            "tool_call_parser": p.tool_call_parser,
+            "reasoning_parser": p.reasoning_parser,
+            "is_hybrid": bool(getattr(p, "is_hybrid", False)),
+            "is_moe": bool(getattr(p, "is_moe", False)),
+            "supports_spec_decode": bool(getattr(p, "supports_spec_decode", False)),
+            "supports_native_mtp": bool(getattr(p, "supports_native_mtp", False)),
+            "native_mtp_draft_model": getattr(p, "native_mtp_draft_model", None),
+            "mtp_draft_model": getattr(p, "mtp_draft_model", None),
+            "mtp_speculative_tokens": getattr(p, "mtp_speculative_tokens", None),
+            "mtp_continuous_batching_tier": getattr(
+                p, "mtp_continuous_batching_tier", "unknown"
+            ),
+            "mtp_default_enabled": bool(getattr(p, "mtp_default_enabled", True)),
+            "tensorfold_mtp": bool(getattr(p, "tensorfold_mtp", False)),
+            "tensorfold_kernel": bool(getattr(p, "tensorfold_kernel", False)),
+            "tensorfold_target_revision": getattr(
+                p, "tensorfold_target_revision", None
+            ),
+            "tensorfold_runtime_revision": getattr(
+                p, "tensorfold_runtime_revision", None
+            ),
+            "tensorfold_backend": "tensorfold"
+            if getattr(p, "tensorfold_mtp", False)
+            or getattr(p, "tensorfold_kernel", False)
+            else None,
+            "modality": modality,
+            "video_modes": list(p.video_modes or ()),
+            "min_memory_gb": p.min_memory_gb,
+            "default_steps": default_steps,
+            # Video aliases are only launchable when this host's actual video
+            # runtime preflight passes. The check is side-effect free and
+            # reuses the serve/pull gate, so there is no separate capability
+            # matrix to keep in sync. Desktop parses known keys only.
+            **(
+                {
+                    "runtime_ready": _video_alias_runtime_ready(alias),
+                }
+                if modality == "video-gen"
+                else {}
+            ),
+            # Desktop consumes these as a launch-safety contract. Only
+            # curated aliases may opt into eager MLLM loading, and an
+            # explicit text-only pin always wins over name inference.
+            "is_builtin": alias in builtin_aliases,
+            "is_text_only": bool(getattr(p, "is_text_only", False)),
+            "supports_image_input": bool(getattr(p, "supports_image_input", False)),
+        }
+
+    text, video, image = {}, {}, {}
+    for alias, p in all_profiles.items():
+        bucket = {"video-gen": video, "image-gen": image}.get(_modality(p), text)
+        bucket[alias] = p
+
+    payload = {
+        "text": [_profile_dict(a, text[a]) for a in sorted(text)],
+        "video": [_profile_dict(a, video[a]) for a in sorted(video)],
+        "image": [_profile_dict(a, image[a]) for a in sorted(image)],
+        "audio": [],
+    }
+    try:
+        from rapid_mlx.audio.registry import list_audio_aliases
+
+        payload["audio"] = [
+            {
+                "alias": e.alias,
+                "hf_id": e.hf_id,
+                "kind": e.type,
+                "family": e.family,
+                "modality": "audio",
+            }
+            for e in list_audio_aliases()
+        ]
+    except Exception:
+        payload["audio"] = []
+    # Atomic catalog shadow. Existing bucket keys remain byte-compatible for
+    # older Desktop builds; new consumers read this joined model/alias graph.
+    # It is deliberately read-only: legacy registries still resolve launches
+    # until the migration report stays clean through a release window.
+    try:
+        from rapid_mlx.catalog import build_catalog_bundle
+
+        payload["atomic"] = build_catalog_bundle()
+    except Exception:
+        # Shadow data must never take the legacy discovery surface down. CI
+        # validates every checked-in registry; an installed optional/corrupt
+        # audio registry still degrades exactly as it did before atomic mode.
+        pass
+
+cli.py:13127-13174
+def rm_command(args):
+    """Remove a model from the HuggingFace cache.
+
+    Default flow prompts for confirmation, defaulting to N — a real user
+    typo (``rapid-mlx rm qwn3.5-9b-4bit`` → matches a 6 GB model) could
+    silently nuke gigabytes of weights pre-0.9.7. EOF (non-TTY pipe,
+    ctrl-D) also cancels rather than being treated as accept-by-default.
+    ``-y/--yes`` skips the prompt for scripts.
+    """
+    from rapid_mlx.byom.imports import remove_import
+
+    if remove_import(args.model, assume_yes=getattr(args, "yes", False)):
+        return
+
+    from huggingface_hub import scan_cache_dir
+
+    repo_id = args.model
+    cache = scan_cache_dir()
+    # Filter by repo_type=="model" — same repo_id can refer to a dataset or
+    # space, and we don't want ``rapid-mlx rm foo`` deleting a dataset.
+    matching = [
+        r for r in cache.repos if r.repo_id == repo_id and r.repo_type == "model"
+    ]
+    if not matching:
+        print(f"\n  '{repo_id}' is not in the HuggingFace cache.")
+        print("  Nothing to remove.")
+        sys.exit(1)
+
+    repo = matching[0]
+    size_str = _format_bytes(repo.size_on_disk)
+
+    if not getattr(args, "yes", False):
+        try:
+            response = input(f"Remove {repo_id} ({size_str})? [y/N] ").strip().lower()
+        except EOFError:
+            # Non-TTY (piped stdin, ctrl-D) — treat as cancel, never as
+            # silent-yes. Matches ``apt`` / ``brew`` muscle memory.
+            print("Aborted.")
+            sys.exit(0)
+        if response not in ("y", "yes"):
+            print("Aborted.")
+            sys.exit(0)
+
+    revisions = [rev.commit_hash for rev in repo.revisions]
+    strategy = cache.delete_revisions(*revisions)
+    strategy.execute()
+    print(f"Freed {size_str}")
+
+
+cli.py:7480-7510
+    # Recognition is alias-substring based (``whisper``, ``parakeet``,
+    # ``kokoro``, ``chatterbox``, ``vibevoice``, ``voxcpm``) so the
+    # quantised variants (``kokoro-4bit``) and HF-style ids
+    # (``mlx-community/Kokoro-82M-bf16``) trip it the same way bare
+    # aliases do. A model name that doesn't match an audio token falls
+    # through unchanged — text/vision/embedding models never see this
+    # probe.
+    from .audio.probe import is_audio_model_alias, require_audio_or_exit
+    from .audio.registry import (
+        register_served_local_audio_entry,
+        resolve_local_audio_folder,
+    )
+
+    local_audio_entry = resolve_local_audio_folder(getattr(args, "model", None))
+    if local_audio_entry is not None:
+        register_served_local_audio_entry(local_audio_entry, args.model)
+        args._original_alias = args.model
+    if local_audio_entry is not None or is_audio_model_alias(
+        getattr(args, "model", None)
+    ):
+        _run_optional_runtime_guard(
+            require_audio_or_exit,
+            args.model,
+            alias_or_path=getattr(args, "_original_alias", None) or args.model,
+            assume_yes=bool(getattr(args, "yes", False)),
+        )
+
+    _validate_v41_product_spec_flags(args, owns_runtime=_owns_v41_product_download)
+    if _owns_v41_product_download and args.mcp_config:
+        from .telemetry.inference import emit_capability_rejected
+

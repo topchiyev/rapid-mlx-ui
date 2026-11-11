@@ -1,0 +1,20 @@
+{
+  "openapi": "3.1.0",
+  "paths": {
+    "/health": {
+      "get": {}
+    },
+    "/v1/models": {
+      "get": {}
+    },
+    "/v1/chat/completions": {
+      "post": {}
+    },
+    "/v1/audio/transcriptions": {
+      "post": {}
+    },
+    "/v1/requests/{request_id}/cancel": {
+      "post": {}
+    }
+  }
+}

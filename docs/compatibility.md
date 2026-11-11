@@ -1,0 +1,60 @@
+# rapid-mlx compatibility
+
+The initial managed profile is **rapid-mlx 1.0.2**, inspected on Apple Silicon macOS on 2026-11-11. Later versions are rejected until reviewed. This is source/CLI and synthetic-protocol evidence; no model was started, downloaded, transcribed, or used for inference during this backend implementation.
+
+## Evidence and fixtures
+
+The installed executable is `/opt/homebrew/bin/rapid-mlx`. Installed source resides under `/opt/homebrew/Cellar/rapid-mlx/1.0.2/libexec/lib/python3.15/site-packages/rapid_mlx`. Version and help were executed with telemetry/version checks disabled and Hugging Face offline. The fixture [manifest](../fixtures/runtime/provenance.json) records each capture or synthetic response, source paths, line ranges and source SHA-256 hashes. Source excerpt fixtures permit review without the original installation. JSON/SSE responses are synthetic, source-derived examples, **not captured inference**. The OpenAPI fixture is a minimal route-presence test document, not an exported complete runtime schema. `server.py:1455` declares FastAPI `info.version=0.6.0` even in engine 1.0.2; this schema version must not be used as the executable version for optional capability gating. Timing fields are intentionally absent: no decode-rate/provider measurement has been verified.
+
+The [version](../fixtures/runtime/version.txt), [serve](../fixtures/runtime/serve-help.txt), [models](../fixtures/runtime/models-help.txt), [pull](../fixtures/runtime/pull-help.txt), and [rm](../fixtures/runtime/rm-help.txt) captures verify invoked options. `cli.py::_available_models_json_payload`, `_cached_models_json_payload`, `pull_command`, and `rm_command` define catalog/mutation contracts. Parsed catalogs tolerate additional fields and classify audio `kind=stt` separately from `tts` and alignment.
+
+## Executable and process contract
+
+Executable discovery prefers an explicit configured file, then PATH, then `/opt/homebrew/bin/rapid-mlx` and `/usr/local/bin/rapid-mlx` for GUI launches. It never installs a runtime. Each managed start probes `--version` and `serve --help` with a ten-second timeout and bounded stdout. A version mismatch or missing required local-only flag blocks startup.
+
+Launch uses an argument array, never shell interpolation:
+
+```text
+rapid-mlx serve <canonical-local-folder>
+  --served-model-name <selected-stable-identity>
+  --host 127.0.0.1 --port <explicit-port>
+  --disable-model-downloads --watchdog-ppid <app-pid>
+  --disable-disk-caches
+```
+
+Disk cache disabling defaults on and is configurable separately from Hugging Face model storage. The child receives `HF_HUB_CACHE=<selected-cache>`, `HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`, `RAPID_MLX_TELEMETRY=0`, `RAPID_MLX_DISABLE_VERSION_CHECK=1`, `HF_HUB_DISABLE_TELEMETRY=1`, and `DO_NOT_TRACK=1`. `cli_parser.py`, `_version_check.py`, `telemetry/state.py`, and `_parent_watchdog.py` define these controls. No remote model identifier replaces a missing local path. `RuntimeConfig.app_state_root` defaults to `~/.rapid-mlx-ui`; managed staging uses `runtime/chat` or `runtime/asr` beneath it. Python audio `tempfile` follows the provided `TMPDIR` (also TMP/TEMP), relative artifacts use that role directory as cwd, XDG cache and HF_HOME are set there, and the verified `RAPID_MLX_STATE_DIR` first-run override is set below it. HF_HUB_CACHE remains the separately selected shared weight cache. These are explicit known-path controls, not an OS filesystem sandbox; third-party hardcoded output paths still require a live integration audit. Parent watchdog source checks live PPID every two seconds and sends SIGTERM to itself, escalating after its grace period when the parent dies. It is not proof of abrupt-parent-death descendant cleanup for every audio backend.
+
+The supervisor has stopped/starting/ready/stopping/failed states. Defaults are chat port 8000, ASR port 8001 and a 300-second startup deadline. A pre-spawn bind detects occupied ports; the runtime's explicit-port binding is the authoritative collision check. Readiness requires a live owned child, HTTP success with explicit `ready=true` at `/health` (a 200 alone can precede warmup completion), the expected role (`llm`/`mllm` for chat, `stt` for ASR), the exact selected `/v1/models` identity, and OpenAPI presence of the role's POST endpoint. HTTP uses numeric loopback origins, no proxy, no redirects, a three-second request timeout and 4 MiB JSON cap. Readiness polls with bounded backoff. Health/schema readiness establishes routing and identity, not successful future inference or complete auxiliary assets.
+
+External attachment is explicit, requires a numeric loopback `http` origin (including IPv6 loopback), and uses the same identity/route checks. `attach_with_credential` accepts a current-run bearer credential retained only in supervisor memory for readiness and periodic checks; it is cleared on stop or owned start and is not serialized. It stores no child/PID authority. Stop detaches external connections without signalling their server. Owned children run in private process groups. Stop sends TERM to that owned group, waits up to ten seconds for the leader, kills/reaps it if necessary, and kills residual members of that same group. `kill_on_drop` and the runtime parent watchdog provide fallback protection. Callers must finalize/cancel inference and clear the active-inference guard before shutdown or switching. No process-name scanning, PID adoption, port scanning, or external restart occurs.
+
+Runtime output remains third-party diagnostic text, capped at 2,000 lines of 8 KiB each. Readers discard line overflow without allocating unbounded buffers. It may contain sensitive information produced by the engine; it is neither app-generated prompt logging nor automatically uploaded. Application errors never log request bodies or credentials.
+
+## Chat, effort, and cancellation
+
+Source contracts use `/v1/chat/completions`, separate `delta.content` and `delta.reasoning_content`, the shared `chatcmpl-…` SSE identity, final reported usage, and `[DONE]`. The [request](../fixtures/runtime/chat-request.json), [SSE](../fixtures/runtime/chat.sse), [error](../fixtures/runtime/error.json), and [models](../fixtures/runtime/models.json) examples are sanitized synthetic protocol cases. Unknown usage/timing remains unavailable, never zero or an estimate.
+
+`api/models.py` accepts `none`, `minimal`, `low`, `medium`, `high`, `xhigh`. Acceptance alone does not prove a model responds meaningfully. `service/helpers.py::maybe_apply_reasoning_effort` supplies these source-backed normalizations:
+
+| Model/template evidence | Requested effort | Runtime normalization |
+| --- | --- | --- |
+| Verified thinking-enabled template honoring enable_thinking (hybrid Qwen3/GLM4/DeepSeek family examples in source) | none | `chat_template_kwargs.enable_thinking=false` |
+| Thinking model without native effort vocabulary | minimal / low / medium / high / xhigh | `reasoning_max_tokens=256 / 512 / 2048 / 8192 / 24000` (a subtractive budget cap) |
+| Served template exposing native levels (source example Qwen3.8: low, medium, xhigh) | graded values | nearest ranked native value; ties round up: minimal→low and high→xhigh; no additional cap |
+| Unknown model/template or non-thinking model | any | keep the control unavailable; send no invented setting |
+
+Specific client native knobs win on their own dimensions. A parser name does not certify effort. The [effort fixture](../fixtures/runtime/effort.json) records normalization and unavailable cases; no particular downloaded model has live effort verification in this work.
+
+`routes/health.py::cancel_request` explicitly documents that the first SSE `chatcmpl-…` ID is the cancellation key and calls `engine.abort_request(id)`. POST `/v1/requests/{id}/cancel` returns `{object:"request.cancel",id,cancelled:true}` only after an accepted abort. Unknown/completed IDs or engines lacking abort yield 404; missing engine yields 503. [Confirmed](../fixtures/runtime/cancel-confirmed.json) and [unavailable](../fixtures/runtime/cancel-unavailable.json) fixtures cover both outcomes. Close the local stream immediately, retain partial output, and ignore later deltas. If there is no verified ID, route, or acknowledgement, label server termination unconfirmed and refresh status. Never stop an external service to cancel a turn.
+
+## ASR contract and limits
+
+The backend recognizes STT metadata families from the installed registry (fireredasr2, granite_speech5_ctc, nemotron_asr, parakeet, qwen3_asr, sensevoice, whisper). A known STT family with weights remains an explicit unknown-load candidate without imposing a chat tokenizer requirement; TTS/aligner and unknown metadata cannot activate under the transcription role. `cli.py` detects local audio folders through `audio/registry.py::resolve_local_audio_folder` and registers the selected local entry. Serve uses the same offline launch controls on an independent port. `routes/audio.py::_served_local_request` maps the configured served alias/model name to its local folder. Always send that explicit identity; omitting `model` could silently choose `whisper-large-v3`. A text-only server or a TTS/aligner identity is not evidence of ASR availability.
+
+POST `/v1/audio/transcriptions` uses multipart `file`, `model`, optional `language`, `response_format`, `context`, and `timestamp_granularities[]`. Form fields take precedence over query fields. Sending `text` selects forced alignment, not speech recognition. The runtime supports JSON, verbose JSON and subtitle/text formats as validated in its audio route; the initial adapter must only expose options it actually implements. Source enforces **25 MiB per file**, plus 1 MiB multipart overhead. This is a byte limit, not a guaranteed duration or codec limit. Desktop WAV/duration policies may be stricter and must be labeled app limits.
+
+Audio requires the installed `mlx_audio` STT dependencies, family-specific codec/processor support and locally available auxiliary assets. `audio/stt.py` has a local Whisper processor loading path; required processor assets are not proven by a weight file alone. Missing extras/assets must surface unavailable without installing or downloading during inference. The [ASR request](../fixtures/runtime/asr-request.json), [response](../fixtures/runtime/asr-response.json), and [unavailable](../fixtures/runtime/asr-unavailable.json) fixtures cover protocol shape only. No live ASR model has been certified. ASR responses do not establish a chat-style cancellable request ID; local cancellation is unconfirmed unless a separate verified ASR mechanism is added.
+
+## Validation boundaries
+
+Automated backend checks use temporary cache files, fake executables and loopback HTTP. They exercise cache precedence, revision identity, metadata/shard failures, symlinks, startup flags/environment, missing controls, occupied ports, startup exit/deadline cleanup, exact readiness identity, external preservation, bounded logs, active-use locks and stale deletion confirmations. Owned descendant process-group cleanup is also tested. The later live Qwen3.5 4B text/cancellation run and native screenshot/accessibility inspection are recorded in [implementation validation](./validation.md). Live ASR processor completeness, the full native interaction walkthrough, and abrupt parent-watchdog behavior remain acceptance gates; backend tests alone do not complete UI tasks.

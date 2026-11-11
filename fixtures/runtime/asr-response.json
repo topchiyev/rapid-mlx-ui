@@ -1,0 +1,7 @@
+{
+  "task": "transcribe",
+  "language": "en",
+  "duration": 1.0,
+  "text": "Fixture transcript",
+  "segments": []
+}

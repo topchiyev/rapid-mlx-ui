@@ -1,0 +1,8 @@
+usage: rapid-mlx rm [-h] [-y] model
+
+positional arguments:
+  model       Model alias (e.g. qwen3.5-4b-4bit) or HF repo (org/name)
+
+options:
+  -h, --help  show this help message and exit
+  -y, --yes   Skip the confirmation prompt and remove the model immediately.

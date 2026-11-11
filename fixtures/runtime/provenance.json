@@ -1,0 +1,379 @@
+{
+  "inspected_at": "2026-11-11",
+  "runtime": "rapid-mlx 1.0.2",
+  "network_model_mutations": "none; version/help and source inspection only",
+  "fixtures": {
+    "source-cli_parser.py.txt": {
+      "kind": "verbatim_source_excerpt",
+      "source": "/opt/homebrew/Cellar/rapid-mlx/1.0.2/libexec/lib/python3.15/site-packages/rapid_mlx/cli_parser.py",
+      "sha256_of_source": "b56258db6bfcde973f425daf5e398a11a21d706a316378773c05386e8b31acfa",
+      "ranges": [
+        [
+          114,
+          149
+        ],
+        [
+          1970,
+          1995
+        ],
+        [
+          2490,
+          2578
+        ],
+        [
+          2596,
+          2618
+        ]
+      ]
+    },
+    "source-cli.py.txt": {
+      "kind": "verbatim_source_excerpt",
+      "source": "/opt/homebrew/Cellar/rapid-mlx/1.0.2/libexec/lib/python3.15/site-packages/rapid_mlx/cli.py",
+      "sha256_of_source": "dc41f4e9edda3adb66ae3543b0f910d388197967e393893e6c09b09f136c1f6f",
+      "ranges": [
+        [
+          11176,
+          11330
+        ],
+        [
+          11330,
+          11455
+        ],
+        [
+          13127,
+          13174
+        ],
+        [
+          7480,
+          7510
+        ]
+      ]
+    },
+    "source-api-models.py.txt": {
+      "kind": "verbatim_source_excerpt",
+      "source": "/opt/homebrew/Cellar/rapid-mlx/1.0.2/libexec/lib/python3.15/site-packages/rapid_mlx/api/models.py",
+      "sha256_of_source": "27fd96f81d694471d1e4ee55c8bcfaefa957f791783705078429fe95d2f9e48b",
+      "ranges": [
+        [
+          540,
+          605
+        ],
+        [
+          1690,
+          1708
+        ]
+      ]
+    },
+    "source-service-helpers.py.txt": {
+      "kind": "verbatim_source_excerpt",
+      "source": "/opt/homebrew/Cellar/rapid-mlx/1.0.2/libexec/lib/python3.15/site-packages/rapid_mlx/service/helpers.py",
+      "sha256_of_source": "4b86ceeb157cd471d52b438e9575a56a9bda5063d2a91a24326165ecaec482b6",
+      "ranges": [
+        [
+          1975,
+          2110
+        ]
+      ]
+    },
+    "source-utils-chat_template.py.txt": {
+      "kind": "verbatim_source_excerpt",
+      "source": "/opt/homebrew/Cellar/rapid-mlx/1.0.2/libexec/lib/python3.15/site-packages/rapid_mlx/utils/chat_template.py",
+      "sha256_of_source": "53ba0c6b2b8be946a8d7a59ef50fbeb96eded9fdd7685f78c8d6600d388e2bb4",
+      "ranges": [
+        [
+          2125,
+          2157
+        ]
+      ]
+    },
+    "source-routes-health.py.txt": {
+      "kind": "verbatim_source_excerpt",
+      "source": "/opt/homebrew/Cellar/rapid-mlx/1.0.2/libexec/lib/python3.15/site-packages/rapid_mlx/routes/health.py",
+      "sha256_of_source": "ef8f921597861c84e576b3754c9115c5024b24b44cc171bda8bfe25724684b25",
+      "ranges": [
+        [
+          458,
+          517
+        ]
+      ]
+    },
+    "source-routes-audio.py.txt": {
+      "kind": "verbatim_source_excerpt",
+      "source": "/opt/homebrew/Cellar/rapid-mlx/1.0.2/libexec/lib/python3.15/site-packages/rapid_mlx/routes/audio.py",
+      "sha256_of_source": "e0b67c6249f14add22e496e741364cb953f03143041b83aa1678d40e8d03e620",
+      "ranges": [
+        [
+          212,
+          216
+        ],
+        [
+          518,
+          550
+        ],
+        [
+          2641,
+          2735
+        ]
+      ]
+    },
+    "source-audio-stt.py.txt": {
+      "kind": "verbatim_source_excerpt",
+      "source": "/opt/homebrew/Cellar/rapid-mlx/1.0.2/libexec/lib/python3.15/site-packages/rapid_mlx/audio/stt.py",
+      "sha256_of_source": "9f043fd2ca5064464ef12f0204a11edd7975fb0156b88daf48abdb5d90ee950c",
+      "ranges": [
+        [
+          250,
+          280
+        ]
+      ]
+    },
+    "source-_parent_watchdog.py.txt": {
+      "kind": "verbatim_source_excerpt",
+      "source": "/opt/homebrew/Cellar/rapid-mlx/1.0.2/libexec/lib/python3.15/site-packages/rapid_mlx/_parent_watchdog.py",
+      "sha256_of_source": "fc5582e5763067866c7ab4c6e3d41869d789ad42046f1166e01f41d700e43147",
+      "ranges": [
+        [
+          24,
+          45
+        ],
+        [
+          183,
+          205
+        ]
+      ]
+    },
+    "models-help.txt": {
+      "kind": "captured_cli_stdout",
+      "live_inference": false
+    },
+    "asr-request.json": {
+      "kind": "synthetic_source_derived",
+      "live_inference": false,
+      "contracts": [
+        "routes/audio.py:2641-2735"
+      ]
+    },
+    "rm-help.txt": {
+      "kind": "captured_cli_stdout",
+      "live_inference": false
+    },
+    "error.json": {
+      "kind": "synthetic_source_derived",
+      "live_inference": false,
+      "contracts": [
+        "middleware/exception_handlers.py:894-939; synthetic message, source-accurate HTTP exception envelope"
+      ]
+    },
+    "serve-help.txt": {
+      "kind": "captured_cli_stdout",
+      "live_inference": false
+    },
+    "models.json": {
+      "kind": "synthetic_source_derived",
+      "live_inference": false,
+      "contracts": [
+        "routes/models.py"
+      ]
+    },
+    "health.json": {
+      "kind": "synthetic_source_derived",
+      "live_inference": false,
+      "contracts": [
+        "routes/health.py:156-272; ready is separate from HTTP status"
+      ]
+    },
+    "removal.json": {
+      "kind": "synthetic_source_derived",
+      "live_inference": false,
+      "contracts": [
+        "cli.py:13127-13174",
+        "huggingface_hub/utils/_cache_manager.py:433-547"
+      ]
+    },
+    "asr-unavailable.json": {
+      "kind": "synthetic_source_derived",
+      "live_inference": false,
+      "contracts": [
+        "middleware/exception_handlers.py:894-939; synthetic message, source-accurate HTTP exception envelope",
+        "audio/probe.py:881-898; 503 string detail normalized by middleware"
+      ]
+    },
+    "effort.json": {
+      "kind": "synthetic_source_derived",
+      "live_inference": false,
+      "contracts": [
+        "api/models.py:540-605",
+        "service/helpers.py:1975-2110",
+        "utils/chat_template.py:2125-2157"
+      ]
+    },
+    "cancel-confirmed.json": {
+      "kind": "synthetic_source_derived",
+      "live_inference": false,
+      "contracts": [
+        "routes/health.py:458-517"
+      ]
+    },
+    "cancel-unavailable.json": {
+      "kind": "synthetic_source_derived",
+      "live_inference": false,
+      "contracts": [
+        "middleware/exception_handlers.py:894-939; synthetic message, source-accurate HTTP exception envelope"
+      ]
+    },
+    "cached.json": {
+      "kind": "synthetic_source_derived",
+      "live_inference": false,
+      "contracts": [
+        "cli.py::_cached_models_json_payload"
+      ]
+    },
+    "asr-response.json": {
+      "kind": "synthetic_source_derived",
+      "live_inference": false,
+      "contracts": [
+        "routes/audio.py::_format_stt_response"
+      ]
+    },
+    "available.json": {
+      "kind": "synthetic_source_derived",
+      "live_inference": false,
+      "contracts": [
+        "cli.py::_available_models_json_payload"
+      ]
+    },
+    "chat.sse": {
+      "kind": "synthetic_source_derived",
+      "live_inference": false,
+      "contracts": [
+        "routes/chat.py",
+        "routes/health.py:458-517"
+      ]
+    },
+    "pull-help.txt": {
+      "kind": "captured_cli_stdout",
+      "live_inference": false
+    },
+    "version.txt": {
+      "kind": "captured_cli_stdout",
+      "live_inference": false
+    },
+    "pull.json": {
+      "kind": "synthetic_source_derived",
+      "live_inference": false,
+      "contracts": [
+        "cli_parser.py:2490-2578",
+        "cli.py::pull_command"
+      ]
+    },
+    "openapi.json": {
+      "kind": "synthetic_source_derived",
+      "live_inference": false,
+      "contracts": [
+        "synthetic minimal route availability document only"
+      ]
+    },
+    "chat-request.json": {
+      "kind": "synthetic_source_derived",
+      "live_inference": false,
+      "contracts": [
+        "api/models.py::ChatCompletionRequest"
+      ]
+    },
+    "source-rapid_mlx-audio-registry.py.txt": {
+      "kind": "verbatim_source_excerpt",
+      "source": "/opt/homebrew/Cellar/rapid-mlx/1.0.2/libexec/lib/python3.15/site-packages/rapid_mlx/audio/registry.py",
+      "sha256_of_source": "8e6013bd4bda3ea7f22bd6725d4ed2a25843c8e5eca5a98149f5d33ae31d79b5",
+      "ranges": [
+        [
+          113,
+          141
+        ],
+        [
+          423,
+          498
+        ]
+      ]
+    },
+    "source-rapid_mlx-first_run.py.txt": {
+      "kind": "verbatim_source_excerpt",
+      "source": "/opt/homebrew/Cellar/rapid-mlx/1.0.2/libexec/lib/python3.15/site-packages/rapid_mlx/first_run.py",
+      "sha256_of_source": "57fd39e7bdb5e33d59d68b0e79662457318ec69cde5c0eb0ff603ddb21fdd4b0",
+      "ranges": [
+        [
+          53,
+          67
+        ]
+      ]
+    },
+    "source-rapid_mlx-server.py.txt": {
+      "kind": "verbatim_source_excerpt",
+      "source": "/opt/homebrew/Cellar/rapid-mlx/1.0.2/libexec/lib/python3.15/site-packages/rapid_mlx/server.py",
+      "sha256_of_source": "592a5111d8bc0f7a525e43583e722f74c38e3b9aefcab7152e428b09ca90baa0",
+      "ranges": [
+        [
+          1448,
+          1458
+        ]
+      ]
+    },
+    "source-rapid_mlx-routes-audio.py.txt": {
+      "kind": "verbatim_source_excerpt",
+      "source": "/opt/homebrew/Cellar/rapid-mlx/1.0.2/libexec/lib/python3.15/site-packages/rapid_mlx/routes/audio.py",
+      "sha256_of_source": "e0b67c6249f14add22e496e741364cb953f03143041b83aa1678d40e8d03e620",
+      "ranges": [
+        [
+          1840,
+          1879
+        ]
+      ]
+    },
+    "source-huggingface_hub-utils-_cache_manager.py.txt": {
+      "kind": "verbatim_source_excerpt",
+      "source": "/opt/homebrew/Cellar/rapid-mlx/1.0.2/libexec/lib/python3.15/site-packages/huggingface_hub/utils/_cache_manager.py",
+      "sha256_of_source": "1af89cf65c9fe6c761e48e2639ae31541ab79f9da14733bf5ccc4ffb092fb2ee",
+      "ranges": [
+        [
+          310,
+          361
+        ],
+        [
+          433,
+          547
+        ]
+      ]
+    },
+    "cache-library-audit.json": {
+      "kind": "captured_synthetic_cache_audit",
+      "source": "verify-cache-library.py with installed huggingface_hub; temporary files only",
+      "live_inference": false
+    },
+    "verify-cache-library.py": {
+      "kind": "synthetic_fixture_audit_script",
+      "source": "verify-cache-library.py with installed huggingface_hub; temporary files only",
+      "live_inference": false
+    },
+    "source-health-readiness.txt": {
+      "kind": "verbatim_source_excerpt",
+      "source": "/opt/homebrew/Cellar/rapid-mlx/1.0.2/libexec/lib/python3.15/site-packages/rapid_mlx/routes/health.py",
+      "sha256_of_source": "ef8f921597861c84e576b3754c9115c5024b24b44cc171bda8bfe25724684b25",
+      "ranges": [
+        [
+          156,
+          320
+        ]
+      ]
+    },
+    "source-http-error-envelopes.txt": {
+      "kind": "verbatim_source_excerpt",
+      "source": "/opt/homebrew/Cellar/rapid-mlx/1.0.2/libexec/lib/python3.15/site-packages/rapid_mlx/middleware/exception_handlers.py",
+      "sha256_of_source": "4a2b1571432467fe81c0125d76c72b18c984083efb3dbd5325873681695cf0b0",
+      "ranges": [
+        [
+          894,
+          939
+        ]
+      ]
+    }
+  }
+}

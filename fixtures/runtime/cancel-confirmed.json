@@ -1,0 +1,5 @@
+{
+  "object": "request.cancel",
+  "id": "chatcmpl-fixture",
+  "cancelled": true
+}

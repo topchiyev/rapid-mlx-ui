@@ -1,0 +1,8 @@
+{
+  "error": {
+    "message": "mlx-audio is not available. Fixture audio extra installation guidance omitted.",
+    "type": "api_error",
+    "code": null,
+    "param": null
+  }
+}

@@ -1,0 +1,4 @@
+[
+  {"name":"echo","description":"Synthetic echo","inputSchema":{"type":"object","required":["message"],"properties":{"message":{"type":"string"},"notify":{"type":"boolean"}},"additionalProperties":false}},
+  {"name":"wait","description":"Synthetic blocked operation","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}
+]

@@ -1,0 +1,17 @@
+{
+  "method": "POST",
+  "path": "/v1/audio/transcriptions",
+  "encoding": "multipart/form-data",
+  "fields": {
+    "model": "fixture-asr",
+    "response_format": "verbose_json",
+    "language": "en"
+  },
+  "file": {
+    "field": "file",
+    "filename": "fixture.wav",
+    "content_type": "audio/wav"
+  },
+  "max_file_bytes": 26214400,
+  "cancel_identity": null
+}

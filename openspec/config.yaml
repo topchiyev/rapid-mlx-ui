@@ -5,7 +5,9 @@ context: |
   Deliver a desktop UI. Record UI framework and additional language decisions before scaffolding.
   Keep model discovery and session data local by default; network operations must be explicit.
   Verify rapid-mlx interfaces and model capabilities rather than assuming APIs or effort support.
-  Preserve existing Hugging Face model caches and externally managed runtime processes.
+  Store app-owned state under ~/.rapid-mlx-ui; shared model caches retain configured locations.
+  Discovery and normal inference are read-only/offline; model pulls and cache-aware deletion require explicit user action.
+  Preserve externally managed processes. Provide scoped OS tools, MCP client registration/connectivity, and local transcription with independent model selection.
   Distinguish measured statistics, estimates, and unavailable values.
 
 rules:

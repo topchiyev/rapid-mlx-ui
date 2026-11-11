@@ -1,0 +1,8 @@
+data: {"id": "chatcmpl-fixture", "object": "chat.completion.chunk", "model": "fixture-chat", "choices": [{"index": 0, "delta": {"reasoning_content": "Fixture reasoning"}, "finish_reason": null}]}
+
+data: {"id": "chatcmpl-fixture", "object": "chat.completion.chunk", "model": "fixture-chat", "choices": [{"index": 0, "delta": {"content": "Fixture answer"}, "finish_reason": null}]}
+
+data: {"id": "chatcmpl-fixture", "object": "chat.completion.chunk", "model": "fixture-chat", "choices": [], "usage": {"prompt_tokens": 3, "completion_tokens": 5, "total_tokens": 8}}
+
+data: [DONE]
+

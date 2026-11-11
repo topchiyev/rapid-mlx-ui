@@ -1,0 +1,25 @@
+usage: rapid-mlx pull [-h] [--check] [--json] [--with-ref2va] [--bits N |
+                      --format name] [--request] [--no-preflight]
+                      model
+
+positional arguments:
+  model           Model alias (e.g. qwen3.5-4b-4bit) or HF repo (org/name)
+
+options:
+  -h, --help      show this help message and exit
+  --check         Check metadata and memory fit without downloading
+  --json          With --check, print one schema-v1 JSON verdict
+  --with-ref2va   Pika H3 Flex only: also download the Ref2VA second
+                  transformer and adapter, about 69 GB
+  --bits N        Pull only the <N>bit variant of a multi-variant repo (e.g.
+                  --bits 4 fetches only 4bit/; any N the repo ships works).
+  --format name   Pull only the named format variant of a multi-variant repo
+                  (e.g. --format mxfp4, when the repo ships one). GGUF is not
+                  supported: Rapid-MLX cannot run GGUF files.
+  --request       If the pre-download check refuses a public Hugging Face
+                  model (unsupported architecture or GGUF/.bin-only), file a
+                  support request without asking. Sends only the repo id,
+                  architecture, format, failure class and Rapid-MLX version.
+  --no-preflight  Skip catalog memory admission and the pre-download format
+                  and architecture check for models outside the Rapid-MLX
+                  catalog.
