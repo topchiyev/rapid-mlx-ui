@@ -18,7 +18,7 @@ The app SHALL accept supported audio files and user-initiated microphone recordi
 - **THEN** recording does not begin and the UI explains how to resolve the permission or select an audio file instead
 
 ### Requirement: Managed transcription model selection
-The app SHALL list available and pulled speech-to-text models separately from chat and speech-synthesis models, persist the selected transcription-model identity/revision under `~/.rapid-mlx-ui`, and provide explicit pull, load, unload, and deletion controls through model management.
+The app SHALL list only the tested `mlx-community/Qwen3-ASR-0.6B-5bit` and `mlx-community/nemotron-3.5-asr-streaming-0.6b` repositories as supported speech-to-text choices, separately from chat and speech-synthesis models, persist the selected transcription-model identity/revision under `~/.rapid-mlx-ui`, and provide explicit pull, load, unload, and deletion controls through model management.
 
 #### Scenario: Select an unpulled transcription model
 - **WHEN** the user selects a speech-to-text model whose required files are not local
@@ -28,6 +28,19 @@ The app SHALL list available and pulled speech-to-text models separately from ch
 - **WHEN** the app restarts
 - **THEN** the saved transcription selection is restored independently of the selected chat model
 - **AND** a missing or deleted model is shown as unavailable
+
+### Requirement: Tested STT models only
+The app SHALL restrict STT catalog choices, managed startup, external attachment, and jobs to the two tested repositories above. It SHALL match exact repository IDs case insensitively, optionally with a revision, rather than approving whole families. Unsupported saved selections SHALL remain unavailable without substitution. Existing model files and transcripts SHALL remain untouched. The Voxtral batch adapter and catalog supplement SHALL be removed.
+
+#### Scenario: Unsupported STT model is discovered
+- **WHEN** discovery or the runtime catalog contains Whisper, Voxtral, Parakeet, another untested STT model, or a different Qwen/Nemotron variant
+- **THEN** it is excluded from supported STT choices and cannot load, connect, or transcribe
+- **AND** local files remain available for read-only inventory and explicit deletion
+
+#### Scenario: Restore a previously supported selection
+- **WHEN** the saved STT selection is outside the allowlist
+- **THEN** the original identity remains saved and is shown as unavailable
+- **AND** the user must explicitly select a tested model before recording or transcription
 
 ### Requirement: Transcription model filtering
 The transcription model picker SHALL combine case-insensitive name/repository/identity search with All (default), Pulled, Available, and Served filters, excluding chat and speech-synthesis models. Filtering SHALL preserve saved selection, operate independently of the Models page, and perform no runtime or network actions. No-match feedback SHALL offer Clear filters.

@@ -2,7 +2,7 @@
 use anyhow::{Context, Result, ensure};
 use rapid_mlx_core::{
     audio::{AudioLimits, TranscriptionClient, TranscriptionOutcome},
-    catalog::CacheRoots,
+    catalog::{self, CacheRoots},
     paths::AppPaths,
     runtime::{self, RuntimeConfig, RuntimeRole, RuntimeSupervisor},
 };
@@ -22,6 +22,7 @@ async fn main() -> Result<()> {
         .map_err(|_| anyhow::anyhow!("Expected text must be UTF-8"))?;
     ensure!(args.next().is_none(), "{usage}");
     ensure!(model.is_dir(), "Choose an existing local ASR model folder");
+    let identity = catalog::local_asr_repository(&model)?.context(catalog::UNSUPPORTED_ASR)?;
     rapid_mlx_core::audio::validate_audio(&wav, AudioLimits::default())?;
     let paths = AppPaths::discover()?;
     let root = paths
@@ -42,7 +43,7 @@ async fn main() -> Result<()> {
         let mut config = RuntimeConfig::new(
             runtime::discover_executable(None)?,
             model,
-            "rapid-mlx-ui-asr-smoke".into(),
+            identity.into(),
             RuntimeRole::Transcription,
             CacheRoots::from_env(None)?.resolve(),
         );
@@ -55,7 +56,7 @@ async fn main() -> Result<()> {
             Duration::from_secs(180),
             client.transcribe(
                 &wav,
-                "rapid-mlx-ui-asr-smoke",
+                identity,
                 None,
                 AudioLimits::default(),
                 &CancellationToken::new(),

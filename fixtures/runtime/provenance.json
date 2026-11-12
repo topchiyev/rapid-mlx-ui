@@ -251,7 +251,8 @@
       "kind": "synthetic_source_derived",
       "live_inference": false,
       "contracts": [
-        "cli.py::_available_models_json_payload"
+        "cli.py::_available_models_json_payload",
+        "Synthetic tested Qwen3 and Nemotron identities plus untested Whisper and aligner rows to verify the app STT allowlist"
       ]
     },
     "chat.sse": {

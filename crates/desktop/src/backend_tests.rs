@@ -35,7 +35,7 @@ fn capabilities() -> chat::Capabilities {
 }
 
 #[tokio::test]
-async fn whisper_npz_is_selectable_and_blocked_loads_explain_missing_weights() {
+async fn untested_whisper_is_inventory_only_and_cannot_load() {
     let home = Home::new();
     let mut worker = home.worker();
     let cache = home.0.join("cache");
@@ -50,12 +50,11 @@ async fn whisper_npz_is_selectable_and_blocked_loads_explain_missing_weights() {
     let report = catalog::discover(&cache, &[]);
     worker.models = model_views(&[], &report.models);
     assert_eq!(worker.models.len(), 2);
-    assert!(
-        worker
-            .models
-            .iter()
-            .all(|m| m.kind == "stt" && m.pulled && m.compatible && !m.catalog)
-    );
+    assert!(worker.models.iter().all(|m| m.kind == "stt"
+        && m.pulled
+        && !m.compatible
+        && !m.supported_asr()
+        && !m.catalog));
     let selected = worker.models[0].clone();
     assert!(selected.id.ends_with("@revision"));
     fs::remove_file(selected.path.join("weights.npz")).unwrap();
@@ -69,14 +68,53 @@ async fn whisper_npz_is_selectable_and_blocked_loads_explain_missing_weights() {
         .await
         .unwrap_err()
         .to_string();
-    assert!(
-        error.contains("No safetensors or top-level NPZ weights found"),
-        "{error}"
-    );
+    assert!(error.contains("STT currently supports only"), "{error}");
     assert!(worker.task_handles.is_empty());
     assert!(worker.runtime_busy.is_empty());
     worker.shutdown().await;
 }
+#[tokio::test]
+async fn unsupported_saved_stt_cannot_record_transcribe_or_change_preferences() {
+    let home = Home::new();
+    let mut worker = home.worker();
+    let identity = "mlx-community/Voxtral-Mini-4B-Realtime-2602-4bit@revision";
+    worker.preferences.asr_model = identity.into();
+    worker
+        .store
+        .set_setting("preferences", &worker.preferences)
+        .unwrap();
+    worker.models.push(ModelView {
+        id: identity.into(),
+        repo: "mlx-community/Voxtral-Mini-4B-Realtime-2602-4bit".into(),
+        kind: "stt".into(),
+        pulled: true,
+        compatible: true,
+        path: home.0.join("model"),
+        ..Default::default()
+    });
+    assert!(
+        worker
+            .record(None)
+            .unwrap_err()
+            .to_string()
+            .contains("STT currently supports only")
+    );
+    assert!(
+        worker
+            .transcribe(home.0.join("nonexistent.wav"), None)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("STT currently supports only")
+    );
+    assert!(worker.active.is_none() && !worker.recording && worker.jobs.is_empty());
+    assert!(worker.task_handles.is_empty());
+    worker.shutdown().await;
+    let mut reopened = home.worker();
+    assert_eq!(reopened.preferences.asr_model, identity);
+    reopened.shutdown().await;
+}
+
 async fn create_session(worker: &mut Worker) -> String {
     worker.command(Command::NewSession).await.unwrap();
     let id = worker.sessions[0].id.clone();

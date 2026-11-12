@@ -66,11 +66,9 @@ impl RuntimeConfig {
     pub fn arguments(&self) -> Result<Vec<String>> {
         let model = crate::catalog::inspect_model(&self.model_path)?;
         if self.role == RuntimeRole::Transcription
-            && crate::catalog::local_asr_family(&self.model_path)?.is_none()
+            && crate::catalog::local_asr_repository(&self.model_path)?.is_none()
         {
-            bail!(
-                "selected local folder has no verified ASR family metadata (TTS/aligner and unknown folders cannot activate as transcription)"
-            );
+            bail!(crate::catalog::UNSUPPORTED_ASR);
         }
         if !model.can_attempt_load() {
             bail!("model is not usable: {:?}", model.compatibility);
@@ -655,6 +653,11 @@ impl RuntimeSupervisor {
     ) -> Result<()> {
         if self.child.is_some() || self.inference_active {
             bail!("stop the owned service/inference before attaching");
+        }
+        if role == RuntimeRole::Transcription
+            && crate::catalog::supported_asr_repository(expected_model).is_none()
+        {
+            bail!(crate::catalog::UNSUPPORTED_ASR);
         }
         let endpoint = loopback_endpoint(endpoint)?;
         readiness(&self.client, &endpoint, expected_model, role, credential).await?;
@@ -1582,32 +1585,115 @@ mod tests {
         service.abort();
     }
     #[test]
-    fn asr_role_uses_audio_metadata_without_chat_tokenizer() {
+    fn asr_role_accepts_only_tested_repositories_and_matching_metadata() {
         let root = temp();
-        let path = local_model(&root);
-        fs::write(path.join("config.json"), r#"{"model_type":"parakeet"}"#).unwrap();
-        fs::remove_file(path.join("tokenizer.json")).unwrap();
-        let config = RuntimeConfig::new(
-            "unused".into(),
-            path.clone(),
-            "fixture-asr".into(),
-            RuntimeRole::Transcription,
-            root.clone(),
-        );
-        assert!(config.arguments().is_ok());
-        fs::write(path.join("config.json"), r#"{"model_type":"whisper"}"#).unwrap();
-        fs::remove_file(path.join("model.safetensors")).unwrap();
-        fs::write(path.join("weights.npz"), b"synthetic npz weights").unwrap();
-        let arguments = config.arguments().unwrap();
-        assert_eq!(arguments[1], path.to_str().unwrap());
-        assert!(
-            arguments
-                .iter()
-                .any(|arg| arg == "--disable-model-downloads")
-        );
-        fs::write(path.join("config.json"), r#"{"model_type":"kokoro"}"#).unwrap();
-        assert!(config.arguments().is_err());
+        for (repo, family) in [
+            (crate::catalog::QWEN_ASR_REPOSITORY, "qwen3_asr"),
+            (crate::catalog::NEMOTRON_ASR_REPOSITORY, "nemotron_asr"),
+        ] {
+            let path = root.join(format!(
+                "models--{}/snapshots/revision",
+                repo.replace('/', "--")
+            ));
+            fs::create_dir_all(&path).unwrap();
+            fs::write(
+                path.join("config.json"),
+                serde_json::json!({"model_type":family}).to_string(),
+            )
+            .unwrap();
+            fs::write(path.join("model.safetensors"), b"synthetic").unwrap();
+            let config = RuntimeConfig::new(
+                "unused".into(),
+                path.clone(),
+                format!("{repo}@revision"),
+                RuntimeRole::Transcription,
+                root.clone(),
+            );
+            let arguments = config.arguments().unwrap();
+            assert_eq!(arguments[1], path.to_str().unwrap());
+            assert!(
+                arguments
+                    .iter()
+                    .any(|arg| arg == "--disable-model-downloads")
+            );
+            for rejected in [
+                "whisper",
+                "parakeet",
+                "voxtral_realtime",
+                "kokoro",
+                "qwen3_aligner",
+            ] {
+                fs::write(
+                    path.join("config.json"),
+                    serde_json::json!({"model_type":rejected}).to_string(),
+                )
+                .unwrap();
+                assert!(
+                    config
+                        .arguments()
+                        .unwrap_err()
+                        .to_string()
+                        .contains("STT currently supports only")
+                );
+            }
+        }
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn tested_external_asr_attaches_using_exact_identity_and_disconnects() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        for repository in [
+            crate::catalog::QWEN_ASR_REPOSITORY,
+            crate::catalog::NEMOTRON_ASR_REPOSITORY,
+        ] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let endpoint = format!("http://{}", listener.local_addr().unwrap());
+            let identity = format!("{repository}@revision");
+            let advertised = identity.clone();
+            let service = tokio::spawn(async move {
+                for body in [
+                    serde_json::json!({"ready":true,"model_type":"stt"}),
+                    serde_json::json!({"data":[{"id":advertised}]}),
+                    serde_json::json!({"paths":{"/health":{"get":{}},"/v1/models":{"get":{}},"/v1/audio/transcriptions":{"post":{}}}}),
+                ] {
+                    let (mut socket, _) = listener.accept().await.unwrap();
+                    let mut request = [0; 4096];
+                    assert!(socket.read(&mut request).await.unwrap() > 0);
+                    let body = body.to_string();
+                    socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+                }
+            });
+            let mut supervisor = RuntimeSupervisor::new().unwrap();
+            supervisor
+                .attach(&endpoint, &identity, RuntimeRole::Transcription)
+                .await
+                .unwrap();
+            assert!(
+                matches!(supervisor.state(), RuntimeState::Ready { model, external:true, .. } if model == &identity)
+            );
+            assert!(supervisor.owned_pid().is_none());
+            supervisor.stop().await.unwrap();
+            service.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn external_asr_rejects_untested_identity_before_contacting_server() {
+        let mut supervisor = RuntimeSupervisor::new().unwrap();
+        for identity in [
+            "mlx-community/whisper-tiny-mlx",
+            "mlx-community/Voxtral-Mini-4B-Realtime-2602-4bit",
+            "mlx-community/Qwen3-ASR-1.7B-4bit",
+            "unknown",
+        ] {
+            let error = supervisor
+                .attach("http://127.0.0.1:1", identity, RuntimeRole::Transcription)
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains("STT currently supports only"));
+            assert!(matches!(supervisor.state(), RuntimeState::Stopped));
+        }
     }
     #[test]
     fn removal_rejects_hash_collision_with_dataset() {

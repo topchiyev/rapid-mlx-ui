@@ -47,7 +47,7 @@ The catalog SHALL show model identity, local location, revision when known, logi
 
 #### Scenario: MLX Whisper NPZ checkpoint
 - **WHEN** a recognized ASR checkpoint contains local NPZ weights supported by the verified audio loader
-- **THEN** discovery records the NPZ format and logical weight size and permits an explicit offline load attempt
+- **THEN** discovery records the NPZ format and logical weight size for read-only inventory while the tested STT allowlist blocks activation
 - **AND** missing audio processors or dependencies remain runtime validation errors, while NPZ-only chat or unknown-family checkpoints remain unsupported
 
 #### Scenario: Explain a blocked load

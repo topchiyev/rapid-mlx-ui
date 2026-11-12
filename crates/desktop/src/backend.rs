@@ -952,6 +952,13 @@ impl Worker {
         };
         let credential = self.credentials.get(&role).cloned();
         let selected = self.models.iter().find(|m| m.id == id).cloned();
+        // A catalog alias identifies its exact repository; external servers do
+        // not know the app's `alias:` UI identity.
+        let connection_identity = selected
+            .as_ref()
+            .filter(|model| is_asr && model.catalog && model.supported_asr())
+            .map(|model| model.repo.clone())
+            .unwrap_or_else(|| id.clone());
         let tx = self.events.clone();
         let kind = if is_asr {
             runtime::RuntimeRole::Transcription
@@ -960,6 +967,7 @@ impl Worker {
         };
         let config = if action == "start" {
             let model = selected.as_ref().context("Select a pulled model first")?;
+            ensure!(!is_asr || model.supported_asr(), catalog::UNSUPPORTED_ASR);
             ensure!(
                 model.pulled && !model.path.as_os_str().is_empty(),
                 "Select an exact local revision from Pulled models"
@@ -1032,10 +1040,10 @@ impl Worker {
                     };
                     let expected = advertised
                         .iter()
-                        .find(|served| *served == &id)
-                        .or_else(|| advertised.first())
+                        .find(|served| *served == &connection_identity)
+                        .or_else(|| (!is_asr).then(|| advertised.first()).flatten())
                         .cloned()
-                        .context("Server advertises no usable model")?;
+                        .context("Server does not advertise the selected model; select its exact identity")?;
                     supervisor
                         .attach_with_credential(&endpoint, &expected, kind, credential.as_deref())
                         .await?;
@@ -1438,9 +1446,9 @@ impl Worker {
             .cloned()
             .context("Select and load a transcription model in Voice settings first")?;
         ensure!(
-            model.kind == "stt"
+            model.supported_asr()
                 && (model.pulled && !model.path.as_os_str().is_empty() || model.served),
-            "Select an exact pulled or externally served ASR model"
+            catalog::UNSUPPORTED_ASR
         );
         let supervisor = self
             .asr
@@ -2077,7 +2085,9 @@ fn model_views(
                 revision.chars().take(8).collect::<String>()
             ));
         }
-        let runnable = matches!(kind.as_str(), "text" | "stt");
+        let supported_stt = catalog::supported_asr_repository(&repo).is_some();
+        let unsupported_stt = kind == "stt" && !supported_stt;
+        let runnable = kind == "text" || kind == "stt" && supported_stt;
         views.push(ModelView {
             id,
             name,
@@ -2094,7 +2104,9 @@ fn model_views(
             detail: format!(
                 "{:?}{}",
                 model.compatibility,
-                if runnable {
+                if unsupported_stt {
+                    " · STT unavailable: only tested Qwen3 0.6B 5-bit and Nemotron 3.5 streaming 0.6B are supported"
+                } else if runnable {
                     ""
                 } else {
                     " · inventory only; chat and transcription have separate supported task types"
@@ -2104,6 +2116,9 @@ fn model_views(
         });
     }
     for model in available {
+        if model.modality == "audio" && model.kind.as_deref() == Some("stt") && !model.is_asr() {
+            continue;
+        }
         let pulled = local
             .iter()
             .any(|l| l.repository.as_deref() == Some(&model.hf_path));

@@ -12,6 +12,20 @@
   ],
   "audio": [
     {
+      "alias": "qwen3-asr-0.6b-5bit",
+      "hf_id": "mlx-community/Qwen3-ASR-0.6B-5bit",
+      "kind": "stt",
+      "family": "qwen3_asr",
+      "modality": "audio"
+    },
+    {
+      "alias": "nemotron-3.5-asr-streaming",
+      "hf_id": "mlx-community/nemotron-3.5-asr-streaming-0.6b",
+      "kind": "stt",
+      "family": "nemotron_asr",
+      "modality": "audio"
+    },
+    {
       "alias": "fixture-asr",
       "hf_id": "fixture/asr",
       "kind": "stt",

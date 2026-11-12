@@ -74,6 +74,18 @@ pub struct ModelView {
     pub served: bool,
 }
 
+impl ModelView {
+    pub fn supported_asr(&self) -> bool {
+        self.kind == "stt"
+            && rapid_mlx_core::catalog::supported_asr_repository(if self.repo.is_empty() {
+                &self.id
+            } else {
+                &self.repo
+            })
+            .is_some()
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct RuntimeView {
     pub state: String,

@@ -179,8 +179,8 @@ fn asr_models() -> Vec<ModelView> {
     [
         (
             "local@revision",
-            "Local Whisper",
-            "org/whisper",
+            "Local Qwen3",
+            "mlx-community/Qwen3-ASR-0.6B-5bit",
             "stt",
             true,
             false,
@@ -188,8 +188,8 @@ fn asr_models() -> Vec<ModelView> {
         ),
         (
             "catalog",
-            "Whisper",
-            "org/whisper",
+            "Qwen3",
+            "mlx-community/Qwen3-ASR-0.6B-5bit",
             "stt",
             true,
             true,
@@ -197,32 +197,32 @@ fn asr_models() -> Vec<ModelView> {
         ),
         (
             "available",
-            "Parakeet",
-            "org/parakeet",
+            "Nemotron",
+            "mlx-community/nemotron-3.5-asr-streaming-0.6b",
             "stt",
             false,
             true,
             false,
         ),
-        ("external", "Served Whisper", "", "stt", false, false, true),
+        (
+            "external",
+            "Served Qwen3",
+            "mlx-community/Qwen3-ASR-0.6B-5bit",
+            "stt",
+            false,
+            false,
+            true,
+        ),
         (
             "chat",
-            "Whisper",
-            "org/whisper-chat",
+            "Qwen3",
+            "org/qwen3-chat",
             "text",
             true,
             false,
             false,
         ),
-        (
-            "tts",
-            "Whisper",
-            "org/whisper-tts",
-            "tts",
-            true,
-            false,
-            false,
-        ),
+        ("tts", "Qwen3", "org/qwen3-tts", "tts", true, false, false),
     ]
     .into_iter()
     .map(
@@ -250,20 +250,20 @@ fn asr_search_combines_with_status_and_preserves_exact_local_identity() {
             vec!["local@revision", "catalog", "available", "external"],
         ),
         (
-            "  wHiSpEr  ",
+            "  qWeN3  ",
             AsrAvailability::All,
             vec!["local@revision", "catalog", "external"],
         ),
         (
-            "org/PARAKEET",
+            "mlx-community/NEMOTRON",
             AsrAvailability::Available,
             vec!["available"],
         ),
         ("REVISION", AsrAvailability::Pulled, vec!["local@revision"]),
-        ("whisper", AsrAvailability::Pulled, vec!["local@revision"]),
-        ("whisper", AsrAvailability::Available, vec!["catalog"]),
-        ("whisper", AsrAvailability::Served, vec!["external"]),
-        ("parakeet", AsrAvailability::Pulled, vec![]),
+        ("qwen3", AsrAvailability::Pulled, vec!["local@revision"]),
+        ("qwen3", AsrAvailability::Available, vec!["catalog"]),
+        ("qwen3", AsrAvailability::Served, vec!["external"]),
+        ("nemotron", AsrAvailability::Pulled, vec![]),
         ("missing", AsrAvailability::All, vec![]),
     ] {
         let actual: Vec<_> = matching_asr_models(&models, query, availability)
@@ -346,10 +346,10 @@ fn asr_filters_accept_keyboard_input_without_changing_selection_or_dispatching()
         &ctx,
         &mut app,
         [960.0, 640.0],
-        vec![egui::Event::Text("  PARAKEET  ".into())],
+        vec![egui::Event::Text("  NEMOTRON  ".into())],
         egui::Modifiers::NONE,
     );
-    assert_eq!(app.asr_search, "  PARAKEET  ");
+    assert_eq!(app.asr_search, "  NEMOTRON  ");
     assert!(has_text(&output, "1 of 4 transcription models"));
     assert!(has_text(&output, "local@revision"));
 
@@ -392,6 +392,43 @@ fn asr_filters_accept_keyboard_input_without_changing_selection_or_dispatching()
     assert!(commands.try_iter().next().is_none());
 }
 
+#[test]
+fn unsupported_stt_is_filtered_and_saved_selection_is_unavailable_without_substitution() {
+    let (ctx, mut app, commands) = fixture();
+    app.poll();
+    app.page = Page::Audio;
+    app.state.models = asr_models();
+    let identity = "mlx-community/Voxtral-Mini-4B-Realtime-2602-4bit@revision";
+    app.state.models.push(ModelView {
+        id: identity.into(),
+        kind: "stt".into(),
+        pulled: true,
+        compatible: true,
+        served: true,
+        ..Default::default()
+    });
+    app.preferences.asr_model = identity.into();
+    assert_eq!(
+        matching_asr_models(&app.state.models, "", AsrAvailability::All).len(),
+        4
+    );
+    assert!(matching_asr_models(&app.state.models, "voxtral", AsrAvailability::All).is_empty());
+    commands.try_iter().for_each(drop);
+    let output = frame(
+        &ctx,
+        &mut app,
+        [1320.0, 860.0],
+        vec![],
+        egui::Modifiers::NONE,
+    );
+    assert!(has_text(
+        &output,
+        "Saved transcription selection is unavailable"
+    ));
+    assert_eq!(app.preferences.asr_model, identity);
+    assert!(commands.try_iter().next().is_none());
+}
+
 fn voice_transcript(id: &str, session: &str) -> TranscriptView {
     TranscriptView {
         id: id.into(),
@@ -406,10 +443,16 @@ fn voice_transcript(id: &str, session: &str) -> TranscriptView {
 fn chat_voice_controls_append_to_current_edits_once_without_sending() {
     let (ctx, mut app, commands) = fixture();
     app.poll();
-    app.preferences.asr_model = "fixture-asr".into();
+    app.preferences.asr_model = "mlx-community/Qwen3-ASR-0.6B-5bit".into();
+    app.state.models.push(ModelView {
+        id: app.preferences.asr_model.clone(),
+        kind: "stt".into(),
+        served: true,
+        ..Default::default()
+    });
     app.state.asr = RuntimeView {
         state: "Ready".into(),
-        model: "fixture-asr".into(),
+        model: "mlx-community/Qwen3-ASR-0.6B-5bit".into(),
         ..Default::default()
     };
     app.draft = "existing draft".into();

@@ -108,6 +108,8 @@ All tasks are implementation work and remain unchecked until the stated verifica
 
 - [x] 9.11 Repair common ASR response parsing for scalar/array/absent/null language metadata without discarding valid text, duration, or segments; add safe field-specific schema errors, a synthetic-speech Qwen response fixture with provenance, HTTP/parser regressions across response variants, and an opt-in real-ASR smoke harness. Verify non-silent synthesized speech through the production Rust adapter using existing local Qwen weights offline; run Rust formatting, lint, tests, build, and strict OpenSpec validation, and update the documented evidence and limits.
 
+- [x] 9.12 Restrict supported STT models to the exact tested Qwen3-ASR 0.6B 5-bit and Nemotron 3.5 ASR streaming 0.6B repositories; remove the Voxtral adapter and catalog supplement. Filter untested available/pulled/served STT choices, block unsupported managed startup/external attachment/jobs, and preserve saved identities, model files, and transcripts. Update docs/specs and verify allowlist, variant rejection, selection preservation, runtime guards, Rust formatting/lint/tests/build, and strict OpenSpec validation. Defer model-management UI redesign.
+
 ## 10. Integrated desktop release validation
 
 - [ ] 10.1 Run the complete acceptance walkthrough for empty launch, fixed state root, offline discovery, available/pulled views, explicit pull/removal, chat/effort, cancellation, branching, restart recovery, statistics, and shutdown; record results and resolve failures before completion.

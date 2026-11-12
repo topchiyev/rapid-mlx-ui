@@ -56,7 +56,7 @@ fn matching_asr_models<'a>(
     models
         .iter()
         .filter(|model| {
-            model.kind == "stt"
+            model.supported_asr()
                 && availability.matches(model)
                 && [&model.name, &model.repo, &model.id]
                     .iter()
@@ -605,7 +605,8 @@ impl Frontend {
             } else {
                 let ready = self.state.asr.state.starts_with("Ready")
                     && !self.preferences.asr_model.is_empty()
-                    && self.preferences.asr_model == self.state.asr.model;
+                    && self.preferences.asr_model == self.state.asr.model
+                    && self.state.models.iter().any(|model| model.id == self.preferences.asr_model && model.supported_asr());
                 if ui.add_enabled(ready && self.state.active.is_none(), egui::Button::new("Record voice"))
                     .on_disabled_hover_text("Load your chosen transcription model in Voice settings and finish active inference first.").clicked() {
                     self.save_current();
@@ -1009,7 +1010,7 @@ impl Frontend {
                                     self.save_current();
                                     self.page = Page::Chat;
                                 }
-                                if model.kind == "stt"
+                                if model.supported_asr()
                                     && ui.button("Use for transcription").clicked()
                                 {
                                     self.preferences.asr_model = model.id.clone();
@@ -1293,13 +1294,26 @@ impl Frontend {
                 self.asr_availability = AsrAvailability::All;
             }
         });
-        let total = self.state.models.iter().filter(|m| m.kind == "stt").count();
+        let total = self
+            .state
+            .models
+            .iter()
+            .filter(|m| m.supported_asr())
+            .count();
         let matching =
             matching_asr_models(&self.state.models, &self.asr_search, self.asr_availability).len();
         ui.label(RichText::new(format!("{matching} of {total} transcription models")).color(MUTED));
+        let supported_selection = self
+            .state
+            .models
+            .iter()
+            .any(|model| model.id == self.preferences.asr_model && model.supported_asr());
+        if !self.preferences.asr_model.is_empty() && !supported_selection {
+            ui.label("Saved transcription selection is unavailable. Select a tested Qwen3 or Nemotron model.");
+        }
         if matching == 0 {
             ui.label(if total == 0 {
-                "No transcription models found. Refresh Models or add a local model folder in Settings."
+                "No transcription models found. Refresh Models and pull a tested Qwen3 or Nemotron model."
             } else {
                 "No matching transcription models. Clear filters to show all models."
             });
@@ -1349,10 +1363,16 @@ impl Frontend {
             if previous != self.preferences.asr_model {
                 self.send(Command::Preferences(self.preferences.clone()));
             }
-            if ui.button("Pull").clicked() {
+            if ui
+                .add_enabled(supported_selection, egui::Button::new("Pull"))
+                .clicked()
+            {
                 self.send(Command::Pull(self.preferences.asr_model.clone()));
             }
-            if ui.button("Load").clicked() {
+            if ui
+                .add_enabled(supported_selection, egui::Button::new("Load"))
+                .clicked()
+            {
                 self.send(Command::Runtime {
                     role: "asr".into(),
                     action: "start".into(),
@@ -1366,7 +1386,10 @@ impl Frontend {
                     model: String::new(),
                 });
             }
-            if ui.button("Connect external").clicked() {
+            if ui
+                .add_enabled(supported_selection, egui::Button::new("Connect external"))
+                .clicked()
+            {
                 self.send(Command::Runtime {
                     role: "asr".into(),
                     action: "connect".into(),

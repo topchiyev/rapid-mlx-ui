@@ -72,3 +72,9 @@ Headless egui tests exercise Enter-to-send, Shift+Enter multiline editing, disco
 - Finish live supported-effort verification, remote TLS MCP end-to-end coverage, abrupt parent-watchdog validation, and the complete release acceptance checklist.
 
 Model mutation tests use temporary caches only. The user's existing model weights, imported audio, and unrelated sessions were not deleted. See [the task list](../openspec/changes/plan-rapid-mlx-desktop/tasks.md) for the full outstanding contract.
+
+## Tested-model STT restriction
+
+The current STT allowlist is `mlx-community/Qwen3-ASR-0.6B-5bit` and `mlx-community/nemotron-3.5-asr-streaming-0.6b`, as requested by the user based on their model testing. Earlier Whisper experiments above do not imply current support. Voxtral implementation and fixtures were removed. This change uses synthetic fixtures for guards/filtering and does not download models or repeat live inference.
+
+Validation passed: `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace --quiet` (106 core and 56 desktop passed; four existing ignored), `cargo build -p rapid-mlx-ui`, and strict OpenSpec validation. After the final catalog-alias connection adjustment, desktop tests, formatting, Clippy, and the build passed again. Tests cover exact/case-insensitive IDs and revisions, other variant rejection, matching local family metadata, accepted/rejected external identities, read-only inventory, blocked recording/jobs, and unsupported saved-selection preservation. Native microphone and fresh live-model inference were not exercised for this restriction.

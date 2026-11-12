@@ -139,7 +139,43 @@ fn walk_files(
     }
     Ok(())
 }
-/// STT families explicitly present in the inspected 1.0.2 audio registry.
+pub const QWEN_ASR_REPOSITORY: &str = "mlx-community/Qwen3-ASR-0.6B-5bit";
+pub const NEMOTRON_ASR_REPOSITORY: &str = "mlx-community/nemotron-3.5-asr-streaming-0.6b";
+pub const UNSUPPORTED_ASR: &str = "STT currently supports only mlx-community/Qwen3-ASR-0.6B-5bit and mlx-community/nemotron-3.5-asr-streaming-0.6b; select a tested model";
+
+/// Exact repository identity, optionally followed by an explicit revision.
+pub fn supported_asr_repository(identity: &str) -> Option<&'static str> {
+    let repository = match identity.split_once('@') {
+        Some((repository, revision)) if !revision.is_empty() => repository,
+        Some(_) => return None,
+        None => identity,
+    };
+    [QWEN_ASR_REPOSITORY, NEMOTRON_ASR_REPOSITORY]
+        .into_iter()
+        .find(|supported| supported.eq_ignore_ascii_case(repository))
+}
+
+/// Custom folders without a verified cache repository identity remain inventory only.
+pub fn local_asr_repository(path: &Path) -> Result<Option<&'static str>> {
+    let path = path.canonicalize()?;
+    let repository = path.ancestors().find_map(|ancestor| {
+        if ancestor.file_name()? != "snapshots" {
+            return None;
+        }
+        let name = ancestor.parent()?.file_name()?.to_str()?;
+        supported_asr_repository(&name.strip_prefix("models--")?.replace("--", "/"))
+    });
+    let family = local_asr_family(&path)?;
+    Ok(repository.filter(|repository| {
+        matches!(
+            (*repository, family.as_deref()),
+            (QWEN_ASR_REPOSITORY, Some("qwen3_asr"))
+                | (NEMOTRON_ASR_REPOSITORY, Some("nemotron_asr"))
+        )
+    }))
+}
+
+/// Recognized STT families for inventory classification, not support approval.
 /// Aligner/TTS entries are deliberately excluded. This is routing evidence,
 /// not a claim that optional processors or dependencies are locally complete.
 pub fn local_asr_family(path: &Path) -> Result<Option<String>> {
@@ -153,6 +189,7 @@ pub fn local_asr_family(path: &Path) -> Result<Option<String>> {
         "qwen3_asr",
         "sensevoice",
         "whisper",
+        "voxtral_realtime",
     ];
     if let Some(kind) = config.get("model_type").and_then(Value::as_str) {
         let kind = normalize(kind);
@@ -306,7 +343,9 @@ pub fn inspect_model(path: &Path) -> Result<LocalModel> {
     }
     // Tokenizers/ASR processors vary by architecture. Missing metadata is unknown,
     // never inferred compatibility from a model/repository name.
-    model.compatibility = if asr_family.is_some() {
+    model.compatibility = if asr_family.is_some() && local_asr_repository(&path)?.is_none() {
+        Compatibility::Unsupported(UNSUPPORTED_ASR.into())
+    } else if asr_family.is_some() {
         Compatibility::Unknown("Recognized ASR family; local auxiliary assets and runtime dependencies require explicit offline load validation".into())
     } else if model.model_type.is_none() {
         Compatibility::Unknown("config does not identify a model_type".into())
@@ -520,6 +559,7 @@ impl AvailableModel {
     pub fn is_asr(&self) -> bool {
         self.modality == "audio"
             && self.kind.as_deref() == Some("stt")
+            && supported_asr_repository(&self.hf_path).is_some()
             && self.metadata.get("family").and_then(Value::as_str) != Some("qwen3_aligner")
     }
     pub fn is_chat(&self) -> bool {
@@ -536,7 +576,12 @@ pub fn parse_available_catalog(bytes: &[u8]) -> Result<Vec<AvailableModel>> {
             .and_then(Value::as_array)
             .with_context(|| format!("missing available catalog bucket {bucket}"))?;
         for row in rows {
-            result.push(serde_json::from_value(row.clone())?);
+            let model: AvailableModel = serde_json::from_value(row.clone())?;
+            if model.modality == "audio" && model.kind.as_deref() == Some("stt") && !model.is_asr()
+            {
+                continue;
+            }
+            result.push(model);
         }
     }
     Ok(result)
@@ -584,7 +629,7 @@ mod tests {
     }
 
     #[test]
-    fn whisper_npz_snapshots_are_read_only_load_candidates_with_exact_sizes() {
+    fn unsupported_whisper_npz_snapshots_remain_read_only_inventory_with_exact_sizes() {
         let root = temp();
         for (name, state) in [("small", 768), ("tiny", 384)] {
             let path = root.join(format!(
@@ -598,15 +643,15 @@ mod tests {
             let before = fs::metadata(&weights).unwrap().modified().unwrap();
             let report = discover(&root, &[]);
             let entry = report.models.iter().find(|m| m.load_path == path).unwrap();
-            assert!(entry.can_attempt_load());
-            assert!(matches!(entry.compatibility, Compatibility::Unknown(_)));
+            assert!(!entry.can_attempt_load());
+            assert!(matches!(entry.compatibility, Compatibility::Unsupported(_)));
             assert_eq!(entry.format.as_deref(), Some("npz"));
             assert_eq!(entry.logical_weight_bytes, 21);
             assert_eq!(
                 entry.repository.as_deref(),
                 Some(format!("mlx-community/whisper-{name}-mlx").as_str())
             );
-            assert_eq!(entry.revalidate().unwrap().format.as_deref(), Some("npz"));
+            assert!(entry.revalidate().is_err());
             assert_eq!(fs::read(&weights).unwrap(), b"synthetic NPZ weights");
             assert_eq!(fs::metadata(&weights).unwrap().modified().unwrap(), before);
             fs::write(path.join("model.safetensors"), b"preferred").unwrap();
@@ -738,12 +783,81 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
+    fn stt_allowlist_matches_exact_repositories_and_rejects_other_variants() {
+        for repository in [QWEN_ASR_REPOSITORY, NEMOTRON_ASR_REPOSITORY] {
+            for identity in [
+                repository.to_string(),
+                repository.to_uppercase(),
+                format!("{repository}@revision"),
+            ] {
+                assert_eq!(supported_asr_repository(&identity), Some(repository));
+            }
+        }
+        for rejected in [
+            "mlx-community/whisper-tiny-mlx",
+            "mlx-community/parakeet-tdt-0.6b-v3",
+            "mlx-community/Voxtral-Mini-4B-Realtime-2602-4bit",
+            "mlx-community/Qwen3-ASR-0.6B-4bit",
+            "mlx-community/Qwen3-ASR-1.7B-5bit",
+            "mlx-community/nemotron-3.5-asr-streaming",
+            "other/Qwen3-ASR-0.6B-5bit",
+            "mlx-community/Qwen3-ASR-0.6B-5bit-extra",
+            "mlx-community/Qwen3-ASR-0.6B-5bit@",
+            "alias:qwen3-asr",
+            "qwen3_asr",
+            "nemotron_asr",
+        ] {
+            assert!(supported_asr_repository(rejected).is_none(), "{rejected}");
+        }
+        let root = temp();
+        for (repository, family, supported) in [
+            (QWEN_ASR_REPOSITORY, "qwen3_asr", true),
+            (NEMOTRON_ASR_REPOSITORY, "nemotron_asr", true),
+            ("mlx-community/Qwen3-ASR-1.7B-5bit", "qwen3_asr", false),
+            (
+                "mlx-community/Voxtral-Mini-4B-Realtime-2602-4bit",
+                "voxtral_realtime",
+                false,
+            ),
+        ] {
+            let path = root.join(format!(
+                "models--{}/snapshots/revision",
+                repository.replace('/', "--")
+            ));
+            fs::create_dir_all(&path).unwrap();
+            fs::write(
+                path.join("config.json"),
+                serde_json::json!({"model_type":family}).to_string(),
+            )
+            .unwrap();
+            fs::write(path.join("model.safetensors"), b"unchanged").unwrap();
+            assert_eq!(local_asr_repository(&path).unwrap().is_some(), supported);
+            assert_eq!(inspect_model(&path).unwrap().can_attempt_load(), supported);
+            assert_eq!(
+                fs::read(path.join("model.safetensors")).unwrap(),
+                b"unchanged"
+            );
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn catalogs_keep_asr_separate_from_tts() {
         let models =
             parse_available_catalog(include_bytes!("../../../fixtures/runtime/available.json"))
                 .unwrap();
-        assert_eq!(models.iter().filter(|m| m.is_asr()).count(), 1);
+        assert_eq!(models.iter().filter(|m| m.is_asr()).count(), 2);
         assert_eq!(models.iter().filter(|m| m.is_chat()).count(), 1);
+        assert!(
+            models
+                .iter()
+                .any(|model| model.kind.as_deref() == Some("tts"))
+        );
+        assert!(
+            !models
+                .iter()
+                .any(|model| model.hf_path == "fixture/asr" || model.hf_path == "fixture/aligner")
+        );
         let cached =
             parse_cached_catalog(include_bytes!("../../../fixtures/runtime/cached.json")).unwrap();
         assert!(cached.iter().any(|m| m.state == "incomplete"));
