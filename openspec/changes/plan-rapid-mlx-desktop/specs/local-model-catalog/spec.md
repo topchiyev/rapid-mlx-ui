@@ -45,6 +45,15 @@ The catalog SHALL show model identity, local location, revision when known, logi
 - **THEN** the UI labels compatibility as unknown rather than claiming the model is supported
 - **AND** an explicit load attempt can report the runtime's actual result
 
+#### Scenario: MLX Whisper NPZ checkpoint
+- **WHEN** a recognized ASR checkpoint contains local NPZ weights supported by the verified audio loader
+- **THEN** discovery records the NPZ format and logical weight size and permits an explicit offline load attempt
+- **AND** missing audio processors or dependencies remain runtime validation errors, while NPZ-only chat or unknown-family checkpoints remain unsupported
+
+#### Scenario: Explain a blocked load
+- **WHEN** the user requests activation of an incomplete or unsupported model
+- **THEN** the UI error includes the catalog's specific reason rather than only a generic unsupported-model message
+
 ### Requirement: Refresh and selection integrity
 The app SHALL refresh discovery without clearing a still-valid selection. Before activation it SHALL revalidate that the selected local path is still usable, and it SHALL never replace a missing selection with another model automatically.
 

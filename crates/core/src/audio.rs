@@ -159,12 +159,77 @@ pub enum TranscriptionOutcome {
     Completed(Transcript),
     Cancelled { server_outcome_unknown: bool },
 }
-#[derive(Deserialize)]
 struct WireTranscript {
     text: String,
     language: Option<String>,
     duration: Option<f64>,
     segments: Option<Vec<serde_json::Value>>,
+}
+
+fn decode_transcript(body: &[u8]) -> Result<WireTranscript> {
+    use serde_json::Value;
+    let value: Value = serde_json::from_slice(body).map_err(|error| {
+        anyhow::anyhow!(
+            "Malformed ASR JSON: {:?} error at line {}, column {}",
+            error.classify(),
+            error.line(),
+            error.column()
+        )
+    })?;
+    let fields = value
+        .as_object()
+        .context("Invalid ASR response: expected a JSON object")?;
+    let text = fields
+        .get("text")
+        .and_then(Value::as_str)
+        .context("Invalid ASR response field 'text': expected a string")?
+        .to_owned();
+    // rapid-mlx forwards each backend's detected language metadata: Qwen emits
+    // a list, while other engines return a scalar, null, or no language field.
+    let language = match fields.get("language") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(language)) => Some(language.clone()),
+        Some(Value::Array(languages)) if languages.is_empty() => None,
+        Some(Value::Array(languages)) => Some(
+            languages
+                .iter()
+                .map(Value::as_str)
+                .collect::<Option<Vec<_>>>()
+                .context("Invalid ASR response field 'language': expected an array of strings")?
+                .join(", "),
+        ),
+        _ => bail!(
+            "Invalid ASR response field 'language': expected a string, array of strings, or null"
+        ),
+    };
+    let duration = match fields.get("duration") {
+        None | Some(Value::Null) => None,
+        Some(duration) => {
+            let duration = duration
+                .as_f64()
+                .context("Invalid ASR response field 'duration': expected a number or null")?;
+            ensure!(
+                duration.is_finite() && duration >= 0.0,
+                "Invalid ASR response field 'duration': expected finite nonnegative seconds"
+            );
+            Some(duration)
+        }
+    };
+    let segments = match fields.get("segments") {
+        None | Some(Value::Null) => None,
+        Some(segments) => Some(
+            segments
+                .as_array()
+                .context("Invalid ASR response field 'segments': expected an array or null")?
+                .clone(),
+        ),
+    };
+    Ok(WireTranscript {
+        text,
+        language,
+        duration,
+        segments,
+    })
 }
 
 #[derive(Clone)]
@@ -298,12 +363,7 @@ impl TranscriptionClient {
                 }
                 bail!("Local ASR returned {status}: {diagnostic}");
             }
-            let result: WireTranscript =
-                serde_json::from_slice(&body).context("Malformed ASR response")?;
-            ensure!(
-                result.duration.is_none_or(|v| v.is_finite() && v >= 0.0),
-                "Invalid ASR duration"
-            );
+            let result = decode_transcript(&body)?;
             Ok(TranscriptionOutcome::Completed(Transcript {
                 id: uuid::Uuid::new_v4().to_string(),
                 model: model.into(),
@@ -816,46 +876,134 @@ mod tests {
     #[tokio::test]
     async fn multipart_uses_selected_model_and_verified_response() {
         use tokio::io::AsyncWriteExt;
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let client =
-            TranscriptionClient::new(&format!("http://{}", listener.local_addr().unwrap()))
+        for (body, text, language, duration) in [
+            (
+                r#"{"text":"hello","language":"en","duration":0.1,"segments":[]}"#,
+                "hello",
+                "en",
+                0.1,
+            ),
+            (
+                include_str!("../../../fixtures/runtime/asr-qwen3-response.json"),
+                "This is a local speech recognition test.",
+                "English",
+                2.5525625,
+            ),
+        ] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let client =
+                TranscriptionClient::new(&format!("http://{}", listener.local_addr().unwrap()))
+                    .unwrap();
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let request = read_upload(&mut socket).await;
+                assert!(request.starts_with("POST /v1/audio/transcriptions HTTP/1.1"));
+                assert!(!request.to_ascii_lowercase().contains("authorization:"));
+                assert!(request.contains("name=\"model\"\r\n\r\nselected-local-asr"));
+                assert!(request.contains("name=\"language\"\r\n\r\nen"));
+                assert!(request.contains("name=\"response_format\"\r\n\r\nverbose_json"));
+                assert!(request.contains("filename=\"audio.wav\""));
+                socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).as_bytes()).await.unwrap();
+            });
+            let dir = tempfile::tempdir().unwrap();
+            let path = wav(dir.path());
+            let outcome = client
+                .transcribe(
+                    &path,
+                    "selected-local-asr",
+                    Some("en"),
+                    AudioLimits::default(),
+                    &CancellationToken::new(),
+                )
+                .await
                 .unwrap();
-        let server = tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            let request = read_upload(&mut socket).await;
-            assert!(request.starts_with("POST /v1/audio/transcriptions HTTP/1.1"));
-            assert!(!request.to_ascii_lowercase().contains("authorization:"));
-            assert!(request.contains("name=\"model\"\r\n\r\nselected-local-asr"));
-            assert!(request.contains("name=\"language\"\r\n\r\nen"));
-            assert!(request.contains("name=\"response_format\"\r\n\r\nverbose_json"));
-            assert!(request.contains("filename=\"audio.wav\""));
-            let body = r#"{"text":"hello","language":"en","duration":0.1,"segments":[]}"#;
-            socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).as_bytes()).await.unwrap();
-        });
-        let dir = tempfile::tempdir().unwrap();
-        let path = wav(dir.path());
-        let outcome = client
-            .transcribe(
-                &path,
-                "selected-local-asr",
-                Some("en"),
-                AudioLimits::default(),
-                &CancellationToken::new(),
-            )
-            .await
-            .unwrap();
-        server.await.unwrap();
-        let TranscriptionOutcome::Completed(transcript) = outcome else {
-            panic!("expected transcript")
-        };
-        assert_eq!(transcript.text, "hello");
-        assert_eq!(transcript.model, "selected-local-asr");
-        assert_eq!(transcript.audio_duration_seconds, Some(0.1));
-        assert_eq!(
-            serde_json::from_str::<Transcript>(&serde_json::to_string(&transcript).unwrap())
-                .unwrap(),
-            transcript
-        );
+            server.await.unwrap();
+            let TranscriptionOutcome::Completed(transcript) = outcome else {
+                panic!("expected transcript")
+            };
+            assert_eq!(transcript.text, text);
+            assert_eq!(transcript.detected_language.as_deref(), Some(language));
+            assert_eq!(transcript.model, "selected-local-asr");
+            assert_eq!(transcript.audio_duration_seconds, Some(duration));
+            assert_eq!(
+                serde_json::from_str::<Transcript>(&serde_json::to_string(&transcript).unwrap())
+                    .unwrap(),
+                transcript
+            );
+        }
+    }
+
+    #[test]
+    fn common_asr_language_shapes_preserve_text_timing_and_segments() {
+        use serde_json::{Value, json};
+        for (language, expected) in [
+            (Some(json!("en")), Some("en")),
+            (Some(json!(["English"])), Some("English")),
+            (
+                Some(json!(["English", "Russian"])),
+                Some("English, Russian"),
+            ),
+            (Some(json!([])), None),
+            (Some(Value::Null), None),
+            (None, None),
+        ] {
+            let mut body = json!({"task":"transcribe", "text":"Здравствуйте. Hello.", "duration":1.25,
+                "segments":[{"start":0.0,"end":1.25,"text":"Здравствуйте. Hello."}]});
+            if let Some(language) = language {
+                body["language"] = language;
+            }
+            let result = decode_transcript(&serde_json::to_vec(&body).unwrap()).unwrap();
+            assert_eq!(result.text, "Здравствуйте. Hello.");
+            assert_eq!(result.language.as_deref(), expected);
+            assert_eq!(result.duration, Some(1.25));
+            assert_eq!(
+                result.segments,
+                Some(body["segments"].as_array().unwrap().clone())
+            );
+        }
+        let result = decode_transcript(br#"{"text":""}"#).unwrap();
+        assert!(result.language.is_none());
+        assert!(result.duration.is_none());
+        assert!(result.segments.is_none());
+    }
+
+    #[test]
+    fn malformed_asr_diagnostics_identify_fields_without_echoing_response_values() {
+        use serde_json::json;
+        const PRIVATE: &str = "private-transcript-or-credential";
+        for (body, field) in [
+            (json!({"text":[PRIVATE]}), "'text'"),
+            (
+                json!({"text":PRIVATE, "language":["English", false]}),
+                "'language'",
+            ),
+            (
+                json!({"text":PRIVATE, "language":{"secret":PRIVATE}}),
+                "'language'",
+            ),
+            (json!({"text":PRIVATE, "duration":PRIVATE}), "'duration'"),
+            (json!({"text":PRIVATE, "duration":-1}), "'duration'"),
+            (
+                json!({"text":PRIVATE, "segments":{"secret":PRIVATE}}),
+                "'segments'",
+            ),
+            (json!([PRIVATE]), "JSON object"),
+        ] {
+            let error = decode_transcript(&serde_json::to_vec(&body).unwrap())
+                .err()
+                .unwrap()
+                .to_string();
+            assert!(error.contains(field), "{error}");
+            assert!(!error.contains(PRIVATE));
+        }
+        let body = format!("{{\"text\":\"{PRIVATE}\",\"duration\":NaN}}");
+        let error = decode_transcript(body.as_bytes())
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(error.contains("Malformed ASR JSON"));
+        assert!(error.contains("line") && error.contains("column"));
+        assert!(!error.contains(PRIVATE));
     }
     #[tokio::test]
     async fn current_run_credential_is_header_only_and_errors_are_redacted() {

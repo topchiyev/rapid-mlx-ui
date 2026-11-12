@@ -228,6 +228,18 @@
         "cli.py::_cached_models_json_payload"
       ]
     },
+    "asr-qwen3-response.json": {
+      "kind": "captured_synthetic_speech_inference",
+      "live_inference": true,
+      "model": "mlx-community/Qwen3-ASR-0.6B-5bit@782e765bd462bbe565586d6e55588a3bf0e3750a",
+      "runtime_version": "1.0.2",
+      "audio_source": "macOS say synthesized the fixture's public test sentence as 16 kHz PCM WAV; no microphone or user recording",
+      "contracts": [
+        "POST /v1/audio/transcriptions with response_format=verbose_json",
+        "routes/audio.py::_build_verbose_json_body forwards language arrays from audio/stt.py::STTEngine.transcribe"
+      ],
+      "controls": "Test-owned loopback runtime, exact local weights, downloads disabled, offline environment, temporary state/audio under ~/.rapid-mlx-ui/cache, owned child stopped and reaped"
+    },
     "asr-response.json": {
       "kind": "synthetic_source_derived",
       "live_inference": false,

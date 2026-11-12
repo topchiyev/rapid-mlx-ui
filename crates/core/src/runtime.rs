@@ -1595,6 +1595,16 @@ mod tests {
             root.clone(),
         );
         assert!(config.arguments().is_ok());
+        fs::write(path.join("config.json"), r#"{"model_type":"whisper"}"#).unwrap();
+        fs::remove_file(path.join("model.safetensors")).unwrap();
+        fs::write(path.join("weights.npz"), b"synthetic npz weights").unwrap();
+        let arguments = config.arguments().unwrap();
+        assert_eq!(arguments[1], path.to_str().unwrap());
+        assert!(
+            arguments
+                .iter()
+                .any(|arg| arg == "--disable-model-downloads")
+        );
         fs::write(path.join("config.json"), r#"{"model_type":"kokoro"}"#).unwrap();
         assert!(config.arguments().is_err());
         fs::remove_dir_all(root).unwrap();

@@ -18,6 +18,59 @@ enum Page {
     Stats,
 }
 
+#[derive(Clone, Copy, Default, PartialEq)]
+enum AsrAvailability {
+    #[default]
+    All,
+    Pulled,
+    Available,
+    Served,
+}
+
+impl AsrAvailability {
+    fn label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::Pulled => "Pulled",
+            Self::Available => "Available",
+            Self::Served => "Served",
+        }
+    }
+
+    fn matches(self, model: &ModelView) -> bool {
+        match self {
+            Self::All => true,
+            Self::Pulled => model.pulled && !model.catalog,
+            Self::Available => model.catalog,
+            Self::Served => model.served,
+        }
+    }
+}
+
+fn matching_asr_models<'a>(
+    models: &'a [ModelView],
+    search: &str,
+    availability: AsrAvailability,
+) -> Vec<&'a ModelView> {
+    let query = search.trim().to_lowercase();
+    models
+        .iter()
+        .filter(|model| {
+            model.kind == "stt"
+                && availability.matches(model)
+                && [&model.name, &model.repo, &model.id]
+                    .iter()
+                    .any(|field| field.to_lowercase().contains(&query))
+        })
+        .collect()
+}
+
+#[derive(Clone)]
+struct PendingDictation {
+    id: String,
+    session: String,
+}
+
 pub struct Frontend {
     tx: SyncSender<Command>,
     rx: Receiver<Snapshot>,
@@ -35,6 +88,8 @@ pub struct Frontend {
     search: String,
     pulled_only: bool,
     modality: String,
+    asr_search: String,
+    asr_availability: AsrAvailability,
     mcp_form: McpForm,
     credential: String,
     confirmation: Option<(String, String, String)>,
@@ -46,6 +101,7 @@ pub struct Frontend {
     local_error: Option<String>,
     demo: bool,
     prompt_request: Option<(String, String, String)>,
+    pending_dictation: Option<PendingDictation>,
     #[cfg(test)]
     composer_id: Option<egui::Id>,
 }
@@ -98,6 +154,8 @@ impl Frontend {
             search: String::new(),
             pulled_only: true,
             modality: "all".into(),
+            asr_search: String::new(),
+            asr_availability: AsrAvailability::All,
             mcp_form: McpForm {
                 transport: "stdio".into(),
                 environment: "{}".into(),
@@ -113,16 +171,82 @@ impl Frontend {
             local_error: None,
             demo,
             prompt_request: None,
+            pending_dictation: None,
             #[cfg(test)]
             composer_id: None,
         }
     }
 
     fn send(&mut self, command: Command) {
-        if let Err(error) = self.tx.try_send(command) {
-            self.local_error = Some(format!(
-                "Could not queue action: {error}. Please try again."
-            ));
+        self.queue(command);
+    }
+
+    fn queue(&mut self, command: Command) -> bool {
+        match self.tx.try_send(command) {
+            Ok(()) => true,
+            Err(error) => {
+                self.local_error = Some(format!(
+                    "Could not queue action: {error}. Please try again."
+                ));
+                false
+            }
+        }
+    }
+
+    fn cancel_job(&mut self) {
+        self.pending_dictation = None;
+        self.send(Command::Cancel);
+    }
+
+    fn receive_dictation(&mut self) {
+        let Some(pending) = self.pending_dictation.clone() else {
+            return;
+        };
+        if let Some((id, error)) = &self.state.dictation_error
+            && id == &pending.id
+        {
+            self.local_error = Some(error.clone());
+            self.pending_dictation = None;
+            return;
+        }
+        let Some(transcript) = self
+            .state
+            .transcripts
+            .iter()
+            .find(|t| t.id == pending.id)
+            .cloned()
+        else {
+            return;
+        };
+        if transcript.status != "completed" {
+            if transcript.status != "transcribing" {
+                self.pending_dictation = None;
+            }
+            return;
+        }
+        if transcript.dictation_session.as_deref() != Some(&pending.session) {
+            self.local_error = Some(
+                "Voice transcript has a different destination; it remains in Transcription.".into(),
+            );
+            self.pending_dictation = None;
+            return;
+        }
+        let draft = (self.selected == pending.session).then(|| self.draft.clone());
+        if self.queue(Command::InsertDictation {
+            transcript: pending.id,
+            draft: draft.clone(),
+        }) {
+            if let Some(draft) = draft {
+                if !transcript.text.trim().is_empty() {
+                    self.draft = rapid_mlx_core::audio::insert_transcript(
+                        &draft,
+                        &transcript.text,
+                        rapid_mlx_core::audio::InsertMode::Append,
+                    );
+                }
+                self.dirty = None;
+            }
+            self.pending_dictation = None;
         }
     }
 
@@ -217,6 +341,7 @@ impl Frontend {
                 self.transcript_id = transcript.id.clone();
                 self.transcript_text = transcript.text.clone();
             }
+            self.receive_dictation();
         }
         if self
             .dirty
@@ -465,6 +590,36 @@ impl Frontend {
         });
     }
 
+    fn voice_input(&mut self, ui: &mut egui::Ui, session: &str) {
+        ui.horizontal_wrapped(|ui| {
+            if self.state.recording {
+                ui.colored_label(Color32::LIGHT_RED, "Recording microphone");
+                if ui.button("Stop recording").clicked() {
+                    self.send(Command::StopRecording);
+                }
+                if ui.button("Cancel dictation").clicked() { self.cancel_job(); }
+            } else if self.pending_dictation.is_some() {
+                ui.spinner();
+                ui.label("Transcribing voice…");
+                if ui.button("Cancel dictation").clicked() { self.cancel_job(); }
+            } else {
+                let ready = self.state.asr.state.starts_with("Ready")
+                    && !self.preferences.asr_model.is_empty()
+                    && self.preferences.asr_model == self.state.asr.model;
+                if ui.add_enabled(ready && self.state.active.is_none(), egui::Button::new("Record voice"))
+                    .on_disabled_hover_text("Load your chosen transcription model in Voice settings and finish active inference first.").clicked() {
+                    self.save_current();
+                    let pending = PendingDictation { id: uuid::Uuid::new_v4().to_string(), session: session.into() };
+                    if self.queue(Command::RecordForChat { id: pending.id.clone(), session: pending.session.clone() }) {
+                        self.pending_dictation = Some(pending);
+                    }
+                }
+                if !ready { ui.label(RichText::new("Load a transcription model for voice input").small().color(MUTED)); }
+            }
+            if ui.small_button("Voice settings").clicked() { self.page = Page::Audio; }
+        });
+    }
+
     fn chat(&mut self, ui: &mut egui::Ui) {
         let Some(session) = self
             .state
@@ -606,15 +761,16 @@ impl Frontend {
             let response = ui.add(egui::TextEdit::multiline(&mut self.draft).id_salt("composer-input").return_key(egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::Enter)).hint_text("Message your local model…").desired_width(f32::INFINITY).desired_rows(3));
             #[cfg(test)] { self.composer_id = Some(response.id); }
             if response.changed() { self.dirty = Some(Instant::now()); }
+            self.voice_input(ui, &session.id);
             let enter = response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter) && !input.modifiers.shift);
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Enter to send · Shift+Enter for a new line").small().color(MUTED));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if self.state.active.is_some() {
-                        if ui.button("■  Stop").clicked() { self.send(Command::Cancel); }
+                        if ui.button("■  Stop").clicked() { self.cancel_job(); }
                         ui.spinner();
                     } else {
-                        let enabled = !self.draft.trim().is_empty() && !self.model.is_empty() && !session.unresolved && self.state.chat.state.starts_with("Ready") && self.state.can_send && self.generation.effort.as_ref().is_none_or(|value| self.state.effort_levels.contains(value) && self.model == self.state.chat.model);
+                        let enabled = self.pending_dictation.is_none() && !self.draft.trim().is_empty() && !self.model.is_empty() && !session.unresolved && self.state.chat.state.starts_with("Ready") && self.state.can_send && self.generation.effort.as_ref().is_none_or(|value| self.state.effort_levels.contains(value) && self.model == self.state.chat.model);
                         let clicked = ui.add_enabled(enabled, egui::Button::new(RichText::new("Send  ↗").color(ACCENT))).clicked();
                         if enabled && (clicked || enter) { self.save_current(); self.send(Command::Send { id: session.id.clone(), text: self.draft.trim().to_owned() }); self.draft.clear(); }
                     }
@@ -1105,30 +1261,91 @@ impl Frontend {
             "Turn audio into editable text using a local speech-to-text model.",
         );
         ui.horizontal_wrapped(|ui| {
+            let label = ui.label("Search models");
+            ui.add(
+                egui::TextEdit::singleline(&mut self.asr_search)
+                    .id(egui::Id::unique("asr-model-search"))
+                    .desired_width(220.0)
+                    .hint_text("Name or repository"),
+            )
+            .labelled_by(label.id);
+            let label = ui.label("Show");
+            egui::ComboBox::from_id_salt("asr-availability")
+                .selected_text(self.asr_availability.label())
+                .show_ui(ui, |ui| {
+                    for availability in [
+                        AsrAvailability::All,
+                        AsrAvailability::Pulled,
+                        AsrAvailability::Available,
+                        AsrAvailability::Served,
+                    ] {
+                        ui.selectable_value(
+                            &mut self.asr_availability,
+                            availability,
+                            availability.label(),
+                        );
+                    }
+                })
+                .response
+                .labelled_by(label.id);
+            if ui.button("Clear filters").clicked() {
+                self.asr_search.clear();
+                self.asr_availability = AsrAvailability::All;
+            }
+        });
+        let total = self.state.models.iter().filter(|m| m.kind == "stt").count();
+        let matching =
+            matching_asr_models(&self.state.models, &self.asr_search, self.asr_availability).len();
+        ui.label(RichText::new(format!("{matching} of {total} transcription models")).color(MUTED));
+        if matching == 0 {
+            ui.label(if total == 0 {
+                "No transcription models found. Refresh Models or add a local model folder in Settings."
+            } else {
+                "No matching transcription models. Clear filters to show all models."
+            });
+        }
+        ui.horizontal_wrapped(|ui| {
             let previous = self.preferences.asr_model.clone();
             egui::ComboBox::from_id_salt("asr-model")
+                .width(280.0_f32.min(ui.available_width()))
+                .height(260.0)
+                .truncate()
                 .selected_text(if self.preferences.asr_model.is_empty() {
                     "Choose a transcription model"
                 } else {
                     &self.preferences.asr_model
                 })
                 .show_ui(ui, |ui| {
-                    for model in self.state.models.iter().filter(|m| m.kind == "stt") {
+                    if matching == 0 {
+                        ui.label("No matching transcription models");
+                    }
+                    for model in matching_asr_models(
+                        &self.state.models,
+                        &self.asr_search,
+                        self.asr_availability,
+                    ) {
                         ui.selectable_value(
                             &mut self.preferences.asr_model,
                             model.id.clone(),
                             format!(
                                 "{} {}",
                                 model.name,
-                                if model.pulled {
+                                if model.served {
+                                    "(served)"
+                                } else if model.catalog && model.pulled {
+                                    "(available · repository cached)"
+                                } else if model.pulled {
                                     "(pulled)"
                                 } else {
                                     "(available)"
                                 }
                             ),
-                        );
+                        )
+                        .on_hover_text(&model.id);
                     }
-                });
+                })
+                .response
+                .on_hover_text(&self.preferences.asr_model);
             if previous != self.preferences.asr_model {
                 self.send(Command::Preferences(self.preferences.clone()));
             }
@@ -1214,7 +1431,7 @@ impl Frontend {
                 self.send(Command::Record);
             }
             if self.state.active.is_some() && ui.button("Cancel job").clicked() {
-                self.send(Command::Cancel);
+                self.cancel_job();
             }
         });
         ui.separator();

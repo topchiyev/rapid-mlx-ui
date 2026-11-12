@@ -33,6 +33,50 @@ fn capabilities() -> chat::Capabilities {
         cancellation: false,
     }
 }
+
+#[tokio::test]
+async fn whisper_npz_is_selectable_and_blocked_loads_explain_missing_weights() {
+    let home = Home::new();
+    let mut worker = home.worker();
+    let cache = home.0.join("cache");
+    for name in ["small", "tiny"] {
+        let path = cache.join(format!(
+            "models--mlx-community--whisper-{name}-mlx/snapshots/revision"
+        ));
+        fs::create_dir_all(&path).unwrap();
+        fs::write(path.join("config.json"), r#"{"model_type":"whisper"}"#).unwrap();
+        fs::write(path.join("weights.npz"), b"synthetic npz weights").unwrap();
+    }
+    let report = catalog::discover(&cache, &[]);
+    worker.models = model_views(&[], &report.models);
+    assert_eq!(worker.models.len(), 2);
+    assert!(
+        worker
+            .models
+            .iter()
+            .all(|m| m.kind == "stt" && m.pulled && m.compatible && !m.catalog)
+    );
+    let selected = worker.models[0].clone();
+    assert!(selected.id.ends_with("@revision"));
+    fs::remove_file(selected.path.join("weights.npz")).unwrap();
+    worker.models = model_views(&[], &catalog::discover(&cache, &[]).models);
+    let error = worker
+        .command(Command::Runtime {
+            role: "asr".into(),
+            action: "start".into(),
+            model: selected.id,
+        })
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("No safetensors or top-level NPZ weights found"),
+        "{error}"
+    );
+    assert!(worker.task_handles.is_empty());
+    assert!(worker.runtime_busy.is_empty());
+    worker.shutdown().await;
+}
 async fn create_session(worker: &mut Worker) -> String {
     worker.command(Command::NewSession).await.unwrap();
     let id = worker.sessions[0].id.clone();
@@ -46,6 +90,297 @@ async fn create_session(worker: &mut Worker) -> String {
         .await
         .unwrap();
     id
+}
+
+fn dictation_job(id: &str, session: &str) -> Job {
+    Job {
+        id: id.into(),
+        model: "fixture-asr".into(),
+        revision: None,
+        text: String::new(),
+        status: "transcribing".into(),
+        elapsed_ms: None,
+        transcript: None,
+        source: String::new(),
+        language: None,
+        dictation_session: Some(session.into()),
+    }
+}
+
+fn dictation_result(text: &str) -> audio::TranscriptionOutcome {
+    audio::TranscriptionOutcome::Completed(audio::Transcript {
+        id: "fixture-result".into(),
+        model: "fixture-asr".into(),
+        language_requested: None,
+        text: text.into(),
+        edited_text: None,
+        detected_language: Some("en".into()),
+        audio_duration_seconds: Some(1.0),
+        client_elapsed_ms: 20,
+        segments: None,
+        status: audio::TranscriptionStatus::Completed,
+        server_stop_confirmed: false,
+    })
+}
+
+#[tokio::test]
+async fn dictation_appends_once_to_original_latest_draft_and_restores_without_dispatch() {
+    for current in [true, false] {
+        let home = Home::new();
+        let mut worker = home.worker();
+        let origin = create_session(&mut worker).await;
+        let other = create_session(&mut worker).await;
+        worker.preferences.asr_model = "fixture-asr".into();
+        worker.session_mut(&origin).unwrap().draft = "latest saved background edit".into();
+        worker.persist_session(&origin).unwrap();
+        let job = dictation_job("voice", &origin);
+        worker
+            .store
+            .save_record(&job_record(&job).unwrap())
+            .unwrap();
+        worker.jobs.push(job);
+        worker
+            .event(Event::Transcript {
+                id: "voice".into(),
+                result: Ok(dictation_result("spoken words")),
+                recording: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            worker.session_mut(&origin).unwrap().draft,
+            "latest saved background edit"
+        );
+        assert_eq!(
+            worker.snapshot().transcripts[0]
+                .dictation_session
+                .as_deref(),
+            Some(origin.as_str())
+        );
+        let settings = worker.session_mut(&origin).unwrap().settings.clone();
+        worker
+            .command(Command::InsertDictation {
+                transcript: "voice".into(),
+                draft: current.then(|| "latest unsaved edit".into()),
+            })
+            .await
+            .unwrap();
+        let expected = if current {
+            "latest unsaved edit\nspoken words"
+        } else {
+            "latest saved background edit\nspoken words"
+        };
+        assert_eq!(worker.session_mut(&origin).unwrap().draft, expected);
+        worker
+            .command(Command::InsertDictation {
+                transcript: "voice".into(),
+                draft: Some("stale duplicate".into()),
+            })
+            .await
+            .unwrap();
+        let target = worker.session_mut(&origin).unwrap();
+        assert_eq!(target.draft, expected);
+        assert_eq!(target.transcript_ids, vec!["voice"]);
+        assert_eq!(target.model, "actor-fixture");
+        assert_eq!(
+            serde_json::to_value(&target.settings).unwrap(),
+            serde_json::to_value(settings).unwrap()
+        );
+        assert!(target.messages.is_empty());
+        assert_eq!(worker.session_mut(&other).unwrap().draft, "retained draft");
+        assert_eq!(worker.preferences.asr_model, "fixture-asr");
+        worker.shutdown().await;
+        drop(worker);
+        let mut reopened = home.worker();
+        assert_eq!(reopened.session_mut(&origin).unwrap().draft, expected);
+        assert_eq!(
+            reopened.jobs[0].dictation_session.as_deref(),
+            Some(origin.as_str())
+        );
+        assert!(reopened.active.is_none());
+        assert!(!reopened.recording);
+        assert!(reopened.task_handles.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn dictation_failures_cancelled_late_results_and_readiness_preserve_drafts() {
+    let home = Home::new();
+    let mut worker = home.worker();
+    let session = create_session(&mut worker).await;
+    let error = worker
+        .command(Command::RecordForChat {
+            id: "unready".into(),
+            session: session.clone(),
+        })
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("Select and load"));
+    assert_eq!(worker.snapshot().dictation_error.unwrap().0, "unready");
+    assert!(!worker.recording);
+    assert!(worker.recorder.is_none());
+    worker.active = Some(Active {
+        label: "Recording".into(),
+        session: Some(session.clone()),
+        cancel: CancellationToken::new(),
+    });
+    worker.recording = true;
+    assert!(
+        worker
+            .command(Command::DeleteSession(session.clone()))
+            .await
+            .is_err()
+    );
+    let result = worker
+        .event(Event::Recorded {
+            result: Err("Microphone permission denied".into()),
+            dictation: Some(DictationTarget {
+                id: "permission".into(),
+                session: session.clone(),
+            }),
+        })
+        .await;
+    assert!(result.is_err());
+    assert_eq!(
+        worker.snapshot().dictation_error.unwrap(),
+        ("permission".into(), "Microphone permission denied".into())
+    );
+    assert!(!worker.recording);
+    assert!(worker.active.is_none());
+    worker.jobs.push(dictation_job("late", &session));
+    worker.active = Some(Active {
+        label: "Transcription".into(),
+        session: Some(session.clone()),
+        cancel: CancellationToken::new(),
+    });
+    worker.command(Command::Cancel).await.unwrap();
+    worker
+        .event(Event::Transcript {
+            id: "late".into(),
+            result: Ok(dictation_result("late words")),
+            recording: None,
+        })
+        .await
+        .unwrap();
+    assert!(worker.jobs[0].status.starts_with("cancelled"));
+    assert_eq!(worker.jobs[0].text, "late words");
+    assert!(
+        worker
+            .command(Command::InsertDictation {
+                transcript: "late".into(),
+                draft: None
+            })
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        worker.session_mut(&session).unwrap().draft,
+        "retained draft"
+    );
+    worker.shutdown().await;
+}
+
+#[tokio::test]
+async fn dictation_session_save_failure_keeps_original_draft_and_recoverable_transcript() {
+    let home = Home::new();
+    let mut worker = home.worker();
+    let session = create_session(&mut worker).await;
+    worker.jobs.push(dictation_job("voice", &session));
+    worker
+        .event(Event::Transcript {
+            id: "voice".into(),
+            result: Ok(dictation_result("recoverable voice")),
+            recording: None,
+        })
+        .await
+        .unwrap();
+    let journal = worker.paths.root.join("state.sqlite3-journal");
+    fs::create_dir(&journal).unwrap();
+    assert!(
+        worker
+            .command(Command::InsertDictation {
+                transcript: "voice".into(),
+                draft: Some("new unsaved edit".into())
+            })
+            .await
+            .is_err()
+    );
+    fs::remove_dir(journal).unwrap();
+    assert_eq!(
+        worker.session_mut(&session).unwrap().draft,
+        "retained draft"
+    );
+    assert!(
+        worker
+            .session_mut(&session)
+            .unwrap()
+            .transcript_ids
+            .is_empty()
+    );
+    assert_eq!(
+        worker.store.load_session(&session).unwrap().unwrap().draft,
+        "retained draft"
+    );
+    assert_eq!(worker.jobs[0].text, "recoverable voice");
+    assert_eq!(worker.store.load_records("transcription").unwrap().len(), 1);
+    worker.shutdown().await;
+}
+
+#[tokio::test]
+async fn dictation_transcript_save_failure_reports_the_request_without_changing_draft() {
+    let home = Home::new();
+    let mut worker = home.worker();
+    let session = create_session(&mut worker).await;
+    worker.jobs.push(dictation_job("voice", &session));
+    let journal = worker.paths.root.join("state.sqlite3-journal");
+    fs::create_dir(&journal).unwrap();
+    assert!(
+        worker
+            .event(Event::Transcript {
+                id: "voice".into(),
+                result: Ok(dictation_result("recoverable result")),
+                recording: None
+            })
+            .await
+            .is_err()
+    );
+    fs::remove_dir(journal).unwrap();
+    assert_eq!(worker.snapshot().dictation_error.unwrap().0, "voice");
+    assert_eq!(worker.jobs[0].text, "recoverable result");
+    assert_eq!(
+        worker.session_mut(&session).unwrap().draft,
+        "retained draft"
+    );
+    worker.shutdown().await;
+}
+
+#[tokio::test]
+async fn dictation_empty_results_preserve_draft_without_extra_newlines() {
+    let home = Home::new();
+    let mut worker = home.worker();
+    let session = create_session(&mut worker).await;
+    worker.jobs.push(dictation_job("voice", &session));
+    worker
+        .event(Event::Transcript {
+            id: "voice".into(),
+            result: Ok(dictation_result("")),
+            recording: None,
+        })
+        .await
+        .unwrap();
+    worker
+        .command(Command::InsertDictation {
+            transcript: "voice".into(),
+            draft: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        worker.session_mut(&session).unwrap().draft,
+        "retained draft"
+    );
+    assert!(worker.status.contains("No speech detected"));
+    worker.shutdown().await;
 }
 /// Start through the actual command path; stop the synthetic turn at its first commit
 /// barrier, before HTTP. Subsequent actor events have test-owned ack receivers.
@@ -1295,6 +1630,7 @@ async fn completed_transcript_persists_retained_recording_or_cleared_staging_and
             transcript: None,
             source,
             language: Some("en".into()),
+            dictation_session: None,
         };
         worker
             .store

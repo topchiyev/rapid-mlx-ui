@@ -29,6 +29,20 @@ The app SHALL list available and pulled speech-to-text models separately from ch
 - **THEN** the saved transcription selection is restored independently of the selected chat model
 - **AND** a missing or deleted model is shown as unavailable
 
+### Requirement: Transcription model filtering
+The transcription model picker SHALL combine case-insensitive name/repository/identity search with All (default), Pulled, Available, and Served filters, excluding chat and speech-synthesis models. Filtering SHALL preserve saved selection, operate independently of the Models page, and perform no runtime or network actions. No-match feedback SHALL offer Clear filters.
+
+#### Scenario: Find a transcription model
+- **WHEN** the user enters a search and chooses an availability filter
+- **THEN** only speech-to-text entries matching both controls appear
+- **AND** Pulled includes exact local entries, Available includes catalog entries, and Served includes externally advertised entries
+- **AND** cached catalog entries are not represented as exact pulled revisions
+
+#### Scenario: Filtering hides the selected model
+- **WHEN** the selected model does not match the filters or has disappeared from inventory
+- **THEN** the saved selection remains visible and unchanged
+- **AND** no-match feedback and a Clear filters action let the user restore the full list
+
 ### Requirement: Local transcription execution
 The app SHALL use a verified local rapid-mlx transcription interface with the selected model and supported language/options. It SHALL expose loading, transcribing, completed, failed, and cancelled states and report missing runtime/audio dependencies without installing them or downloading assets implicitly.
 
@@ -41,6 +55,15 @@ The app SHALL use a verified local rapid-mlx transcription interface with the se
 - **THEN** the app explains the missing dependency or asset and preserves the selected model and session
 - **AND** does not fall back to cloud transcription or a different model
 
+#### Scenario: Common ASR response contains multiple language labels
+- **WHEN** a successful response returns language metadata as a string, an array of strings, null, or an omitted field
+- **THEN** the shared transcription adapter preserves the text, duration, and segments without model-specific response parsing
+- **AND** arrays are displayed as comma-separated language labels, with an empty array treated as unavailable
+
+#### Scenario: Malformed response diagnostics
+- **WHEN** an ASR response is invalid JSON or has an unsupported field type
+- **THEN** the error identifies JSON syntax/location or the invalid field without echoing response text or credentials
+
 ### Requirement: Durable transcripts and explicit chat insertion
 The app SHALL persist transcript text, user edits, job status, and model metadata under `~/.rapid-mlx-ui`. It SHALL support inserting selected transcript text into a session composer without sending it automatically or replacing an existing draft silently.
 
@@ -51,6 +74,28 @@ The app SHALL persist transcript text, user edits, job status, and model metadat
 #### Scenario: Reopen transcript history
 - **WHEN** the user restarts and reopens a saved transcript
 - **THEN** its text, edits, outcome, and model reference remain available without rerunning transcription
+
+### Requirement: Voice input in the chat composer
+The chat composer SHALL provide explicit Record voice, Stop recording, and Cancel dictation controls using the selected ready ASR model. Successful dictation SHALL append once to the originating chat draft, preserve existing edits and model settings, and wait for Send. Recording SHALL be unavailable while inference is active or the ASR model is unready, with setup guidance.
+
+#### Scenario: Dictate a message
+- **WHEN** the user records voice from chat and stops recording
+- **THEN** the recording is transcribed locally and its text is appended to that chat's editable draft
+- **AND** the transcript and its session reference are saved without sending a message or changing either model selection
+
+#### Scenario: Navigate or type during dictation
+- **WHEN** the user edits the draft or navigates to another chat before transcription completes
+- **THEN** text is appended to the latest draft in the originating session, never redirected to the newly focused chat
+- **AND** repeated snapshots or insertion commands do not duplicate the transcript
+
+#### Scenario: Cancel or fail dictation
+- **WHEN** recording or transcription is cancelled or fails, including microphone denial or unready ASR
+- **THEN** the draft remains unchanged and the UI reports the outcome while preserving any received transcript in history
+- **AND** late successful capture or transcription events do not insert text after cancellation
+
+#### Scenario: Restart after dictation
+- **WHEN** the app restarts after a completed or interrupted dictation
+- **THEN** persisted draft text and linked transcripts are restored without automatically recording, transcribing, or reinserting text
 
 ### Requirement: Recording data and cancellation
 App-managed audio staging SHALL stay under `~/.rapid-mlx-ui` and be cleaned after terminal jobs by default unless the user enables retention. Imported source files SHALL remain untouched. Cancellation SHALL retain available transcript text and distinguish local cancellation from a confirmed server stop.

@@ -1,0 +1,14 @@
+{
+  "task": "transcribe",
+  "text": "This is a local speech recognition test.",
+  "language": ["English"],
+  "duration": 2.5525625,
+  "segments": [
+    {
+      "id": 0,
+      "start": 0.0,
+      "end": 2.5525625,
+      "text": "This is a local speech recognition test."
+    }
+  ]
+}

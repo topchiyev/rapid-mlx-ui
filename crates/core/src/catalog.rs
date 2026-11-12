@@ -216,30 +216,57 @@ pub fn inspect_model(path: &Path) -> Result<LocalModel> {
         .get("model_type")
         .and_then(Value::as_str)
         .map(str::to_owned);
-    let weights: Vec<_> = files
+    let asr_family = local_asr_family(&path)?;
+    let mut format = "safetensors";
+    let mut weights: Vec<_> = files
         .iter()
         .filter(|p| p.extension().is_some_and(|e| e == "safetensors"))
         .collect();
+    // The verified mlx-audio loader prefers safetensors, then top-level NPZ.
+    // NPZ is an audio contract, not evidence that an arbitrary chat model loads.
+    if weights.is_empty() && asr_family.is_some() {
+        format = "npz";
+        weights = files
+            .iter()
+            .filter(|p| {
+                p.parent() == Some(path.as_path()) && p.extension().is_some_and(|e| e == "npz")
+            })
+            .collect();
+    }
     for file in &weights {
-        model.logical_weight_bytes = model
-            .logical_weight_bytes
-            .saturating_add(fs::metadata(file)?.len());
+        let bytes = fs::metadata(file)?.len();
+        if format == "npz" && bytes == 0 {
+            model.compatibility = Compatibility::Incomplete("Empty NPZ weight file".into());
+            return Ok(model);
+        }
+        model.logical_weight_bytes = model.logical_weight_bytes.saturating_add(bytes);
     }
     if weights.is_empty() {
         model.compatibility = if files
             .iter()
+            .any(|p| p.extension().is_some_and(|e| e == "npz"))
+        {
+            Compatibility::Unsupported(
+                "NPZ weights require a recognized ASR family and top-level weight files".into(),
+            )
+        } else if files
+            .iter()
             .any(|p| p.extension().is_some_and(|e| e == "gguf" || e == "bin"))
         {
             Compatibility::Unsupported(
-                "rapid-mlx 1.0.2 requires supported safetensors; GGUF/.bin-only models cannot load"
+                "GGUF/.bin-only models cannot load; use supported safetensors or ASR NPZ weights"
                     .into(),
             )
         } else {
-            Compatibility::Incomplete("No safetensors weights found".into())
+            Compatibility::Incomplete(if asr_family.is_some() {
+                "No safetensors or top-level NPZ weights found".into()
+            } else {
+                "No safetensors weights found".into()
+            })
         };
         return Ok(model);
     }
-    model.format = Some("safetensors".into());
+    model.format = Some(format.into());
     for index in files.iter().filter(|p| {
         p.file_name()
             .is_some_and(|n| n.to_string_lossy().ends_with(".safetensors.index.json"))
@@ -279,7 +306,7 @@ pub fn inspect_model(path: &Path) -> Result<LocalModel> {
     }
     // Tokenizers/ASR processors vary by architecture. Missing metadata is unknown,
     // never inferred compatibility from a model/repository name.
-    model.compatibility = if local_asr_family(&path)?.is_some() {
+    model.compatibility = if asr_family.is_some() {
         Compatibility::Unknown("Recognized ASR family; local auxiliary assets and runtime dependencies require explicit offline load validation".into())
     } else if model.model_type.is_none() {
         Compatibility::Unknown("config does not identify a model_type".into())
@@ -352,6 +379,7 @@ fn checkpoint_paths(root: &Path) -> (Vec<PathBuf>, Vec<String>) {
                 checkpoint |= name == "config.json"
                     || name.ends_with(".safetensors")
                     || name.ends_with(".safetensors.index.json")
+                    || name.ends_with(".npz")
                     || name.ends_with(".gguf")
                     || name.ends_with(".bin");
             }
@@ -553,6 +581,79 @@ mod tests {
         .unwrap();
         fs::write(p.join("model.safetensors"), b"fixture").unwrap();
         fs::write(p.join("tokenizer.json"), b"{}").unwrap();
+    }
+
+    #[test]
+    fn whisper_npz_snapshots_are_read_only_load_candidates_with_exact_sizes() {
+        let root = temp();
+        for (name, state) in [("small", 768), ("tiny", 384)] {
+            let path = root.join(format!(
+                "models--mlx-community--whisper-{name}-mlx/snapshots/rev-{name}"
+            ));
+            fs::create_dir_all(&path).unwrap();
+            let config = serde_json::json!({"model_type":"whisper", "n_mels":80, "n_audio_state":state, "n_vocab":51865});
+            fs::write(path.join("config.json"), config.to_string()).unwrap();
+            let weights = path.join("weights.npz");
+            fs::write(&weights, b"synthetic NPZ weights").unwrap();
+            let before = fs::metadata(&weights).unwrap().modified().unwrap();
+            let report = discover(&root, &[]);
+            let entry = report.models.iter().find(|m| m.load_path == path).unwrap();
+            assert!(entry.can_attempt_load());
+            assert!(matches!(entry.compatibility, Compatibility::Unknown(_)));
+            assert_eq!(entry.format.as_deref(), Some("npz"));
+            assert_eq!(entry.logical_weight_bytes, 21);
+            assert_eq!(
+                entry.repository.as_deref(),
+                Some(format!("mlx-community/whisper-{name}-mlx").as_str())
+            );
+            assert_eq!(entry.revalidate().unwrap().format.as_deref(), Some("npz"));
+            assert_eq!(fs::read(&weights).unwrap(), b"synthetic NPZ weights");
+            assert_eq!(fs::metadata(&weights).unwrap().modified().unwrap(), before);
+            fs::write(path.join("model.safetensors"), b"preferred").unwrap();
+            let preferred = inspect_model(&path).unwrap();
+            assert_eq!(preferred.format.as_deref(), Some("safetensors"));
+            assert_eq!(preferred.logical_weight_bytes, 9);
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn npz_requires_recognized_asr_metadata_and_nonempty_top_level_weights() {
+        let root = temp();
+        let path = root.join("checkpoint");
+        fs::create_dir_all(&path).unwrap();
+        fs::write(path.join("weights.npz"), b"synthetic").unwrap();
+        for model_type in ["qwen3", "kokoro", "qwen3_forced_aligner", "unknown"] {
+            fs::write(
+                path.join("config.json"),
+                serde_json::json!({"model_type":model_type}).to_string(),
+            )
+            .unwrap();
+            assert!(matches!(
+                inspect_model(&path).unwrap().compatibility,
+                Compatibility::Unsupported(_)
+            ));
+        }
+        fs::write(path.join("config.json"), r#"{"model_type":"whisper"}"#).unwrap();
+        fs::write(path.join("weights.npz"), b"").unwrap();
+        assert!(
+            matches!(inspect_model(&path).unwrap().compatibility, Compatibility::Incomplete(reason) if reason.contains("Empty NPZ"))
+        );
+        fs::remove_file(path.join("weights.npz")).unwrap();
+        assert!(
+            matches!(inspect_model(&path).unwrap().compatibility, Compatibility::Incomplete(reason) if reason.contains("No safetensors or top-level NPZ"))
+        );
+        fs::create_dir(path.join("assets")).unwrap();
+        fs::write(path.join("assets/weights.npz"), b"nested unsupported").unwrap();
+        assert!(!inspect_model(&path).unwrap().can_attempt_load());
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(path.join("missing.npz"), path.join("weights.npz")).unwrap();
+            assert!(
+                matches!(inspect_model(&path).unwrap().compatibility, Compatibility::Incomplete(reason) if reason.contains("broken model symlink"))
+            );
+        }
+        fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn precedence() {

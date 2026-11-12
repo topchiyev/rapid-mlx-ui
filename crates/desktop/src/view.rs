@@ -140,6 +140,7 @@ pub struct TranscriptView {
     pub model: String,
     pub status: String,
     pub duration: String,
+    pub dictation_session: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -167,6 +168,7 @@ pub struct Snapshot {
     pub sample_time: String,
     pub focused_session: String,
     pub recording: bool,
+    pub dictation_error: Option<(String, String)>,
     pub effort_levels: Vec<String>,
     pub effort_note: String,
     pub deletion_preview: Option<(String, String)>,
@@ -245,6 +247,14 @@ pub enum Command {
     },
     Transcribe(PathBuf),
     Record,
+    RecordForChat {
+        id: String,
+        session: String,
+    },
+    InsertDictation {
+        transcript: String,
+        draft: Option<String>,
+    },
     StopRecording,
     SaveTranscript {
         id: String,

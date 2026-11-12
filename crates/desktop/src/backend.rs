@@ -100,6 +100,14 @@ struct Job {
     source: String,
     #[serde(default)]
     language: Option<String>,
+    #[serde(default)]
+    dictation_session: Option<String>,
+}
+
+#[derive(Clone)]
+struct DictationTarget {
+    id: String,
+    session: String,
 }
 
 enum Event {
@@ -128,7 +136,10 @@ enum Event {
         session: String,
         result: std::result::Result<String, String>,
     },
-    Recorded(std::result::Result<audio::StagedAudio, String>),
+    Recorded {
+        result: std::result::Result<audio::StagedAudio, String>,
+        dictation: Option<DictationTarget>,
+    },
     RecordingStarted,
     Transcript {
         id: String,
@@ -172,6 +183,7 @@ struct Worker {
     owned_pids: Arc<StdMutex<(Option<u32>, Option<u32>)>>,
     recorder: Option<mpsc::Sender<bool>>,
     recording: bool,
+    dictation_error: Option<(String, String)>,
     pending_removal: Option<runtime::RemovalPreview>,
     preview_notice: Option<(String, String)>,
     dirty_sessions: BTreeSet<String>,
@@ -249,6 +261,7 @@ impl Worker {
             owned_pids: Arc::default(),
             recorder: None,
             recording: false,
+            dictation_error: None,
             pending_removal: None,
             preview_notice: None,
             dirty_sessions: BTreeSet::new(),
@@ -814,7 +827,65 @@ impl Worker {
                 self.persist_session(&session)?;
             }
             Command::Transcribe(path) => self.transcribe(path, None).await?,
-            Command::Record => self.record()?,
+            Command::Record => self.record(None)?,
+            Command::RecordForChat { id, session } => {
+                self.dictation_error = None;
+                let result = (|| {
+                    ensure!(
+                        !id.is_empty() && !self.jobs.iter().any(|job| job.id == id),
+                        "Invalid dictation identity"
+                    );
+                    self.session_mut(&session)?;
+                    self.record(Some(DictationTarget {
+                        id: id.clone(),
+                        session,
+                    }))
+                })();
+                if let Err(error) = &result {
+                    self.dictation_error = Some((id, error.to_string()));
+                }
+                result?;
+            }
+            Command::InsertDictation { transcript, draft } => {
+                let job = self
+                    .jobs
+                    .iter()
+                    .find(|job| job.id == transcript)
+                    .context("Voice transcript is unavailable")?;
+                ensure!(
+                    job.status == "completed",
+                    "Dictation did not complete successfully"
+                );
+                let session = job
+                    .dictation_session
+                    .as_ref()
+                    .context("This transcript is not chat dictation")?;
+                let index = self
+                    .sessions
+                    .iter()
+                    .position(|s| &s.id == session)
+                    .context(
+                        "The original chat is unavailable; transcript remains in Transcription",
+                    )?;
+                if !self.sessions[index].transcript_ids.contains(&transcript) {
+                    let mut saved = self.sessions[index].clone();
+                    let base = draft.as_deref().unwrap_or(&saved.draft);
+                    saved.draft = if job.text.trim().is_empty() {
+                        base.to_owned()
+                    } else {
+                        audio::insert_transcript(base, &job.text, audio::InsertMode::Append)
+                    };
+                    saved.transcript_ids.push(transcript);
+                    self.store.save_session(&saved)?;
+                    self.sessions[index] = saved;
+                    self.status = if job.text.trim().is_empty() {
+                        "No speech detected. Chat draft unchanged."
+                    } else {
+                        "Voice text appended to the original chat draft. Review it, then Send."
+                    }
+                    .into();
+                }
+            }
             Command::StopRecording => {
                 self.recorder
                     .as_ref()
@@ -895,7 +966,8 @@ impl Worker {
             );
             ensure!(
                 model.compatible,
-                "The selected model is incomplete or unsupported"
+                "The selected model cannot be loaded: {}",
+                model.detail
             );
             let mut config = runtime::RuntimeConfig::new(
                 self.executable()?,
@@ -1305,15 +1377,12 @@ impl Worker {
         }
     }
 
-    fn record(&mut self) -> Result<()> {
+    fn record(&mut self, dictation: Option<DictationTarget>) -> Result<()> {
         ensure!(
             self.active.is_none(),
             "Finish active inference before recording"
         );
-        ensure!(
-            !self.preferences.asr_model.is_empty(),
-            "Select and load a transcription model first"
-        );
+        self.selected_asr()?;
         let root = self.paths.root.clone();
         let tx = self.events.clone();
         let (control, input) = mpsc::channel();
@@ -1321,7 +1390,7 @@ impl Worker {
         self.recording = true;
         self.active = Some(Active {
             label: "Recording microphone".into(),
-            session: None,
+            session: dictation.as_ref().map(|target| target.session.clone()),
             cancel: CancellationToken::new(),
         });
         std::thread::spawn(move || {
@@ -1344,7 +1413,7 @@ impl Worker {
                 }
             })()
             .map_err(|e| e.to_string());
-            let _ = tx.blocking_send(Event::Recorded(result));
+            let _ = tx.blocking_send(Event::Recorded { result, dictation });
         });
         Ok(())
     }
@@ -1354,16 +1423,20 @@ impl Worker {
         source: PathBuf,
         staged: Option<audio::StagedAudio>,
     ) -> Result<()> {
+        self.transcribe_to(source, staged, None).await
+    }
+
+    fn selected_asr(&self) -> Result<ModelView> {
         ensure!(
-            self.active.is_none(),
-            "Finish active chat or transcription first"
+            !self.runtime_busy.contains("asr"),
+            "Transcription runtime is still changing"
         );
         let model = self
             .models
             .iter()
             .find(|m| m.id == self.preferences.asr_model)
             .cloned()
-            .context("Select a pulled transcription model")?;
+            .context("Select and load a transcription model in Voice settings first")?;
         ensure!(
             model.kind == "stt"
                 && (model.pulled && !model.path.as_os_str().is_empty() || model.served),
@@ -1375,7 +1448,7 @@ impl Worker {
             .map_err(|_| anyhow!("Transcription runtime is still changing"))?;
         ensure!(
             matches!(supervisor.state(), runtime::RuntimeState::Ready { model: served, .. } if served == &model.id),
-            "Load the selected transcription model first"
+            "Load the selected transcription model in Voice settings first"
         );
         ensure!(
             supervisor
@@ -1385,12 +1458,29 @@ impl Worker {
                 == Some(chat::validate_endpoint(&self.preferences.asr_endpoint)?),
             "Transcription connection settings changed; reload or reconnect the service"
         );
-        drop(supervisor);
+        Ok(model)
+    }
+
+    async fn transcribe_to(
+        &mut self,
+        source: PathBuf,
+        staged: Option<audio::StagedAudio>,
+        dictation: Option<DictationTarget>,
+    ) -> Result<()> {
+        ensure!(
+            self.active.is_none(),
+            "Finish active chat or transcription first"
+        );
+        let model = self.selected_asr()?;
         let client = audio::TranscriptionClient::with_credential(
             &self.preferences.asr_endpoint,
             self.credentials.get("asr").cloned(),
         )?;
-        let id = uuid::Uuid::new_v4().to_string();
+        let id = dictation
+            .as_ref()
+            .map(|target| target.id.clone())
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let dictation_session = dictation.map(|target| target.session);
         let job = Job {
             id: id.clone(),
             model: model.id,
@@ -1402,13 +1492,14 @@ impl Worker {
             source: source.display().to_string(),
             language: (!self.preferences.asr_language.trim().is_empty())
                 .then(|| self.preferences.asr_language.trim().to_owned()),
+            dictation_session: dictation_session.clone(),
         };
         self.store.save_record(&job_record(&job)?)?;
         self.jobs.insert(0, job);
         let cancel = CancellationToken::new();
         self.active = Some(Active {
             label: "Transcription".into(),
-            session: None,
+            session: dictation_session,
             cancel: cancel.clone(),
         });
         let tx = self.events.clone();
@@ -1618,19 +1709,44 @@ impl Worker {
             Event::RecordingStarted => {
                 self.status = "Recording microphone. Press Stop recording to transcribe.".into()
             }
-            Event::Recorded(result) => {
+            Event::Recorded { result, dictation } => {
+                let cancelled = self
+                    .active
+                    .as_ref()
+                    .is_some_and(|active| active.cancel.is_cancelled());
                 self.recording = false;
                 self.recorder = None;
                 self.active = None;
-                let staged = result.map_err(anyhow::Error::msg)?;
-                let path = staged.path().to_owned();
-                self.transcribe(path, Some(staged)).await?;
+                let outcome = if cancelled {
+                    drop(result);
+                    Err(anyhow!("Recording cancelled"))
+                } else {
+                    match result {
+                        Ok(staged) => {
+                            self.transcribe_to(
+                                staged.path().to_owned(),
+                                Some(staged),
+                                dictation.clone(),
+                            )
+                            .await
+                        }
+                        Err(error) => Err(anyhow!(error)),
+                    }
+                };
+                if let (Err(error), Some(target)) = (&outcome, dictation) {
+                    self.dictation_error = Some((target.id, error.to_string()));
+                }
+                outcome?;
             }
             Event::Transcript {
                 id,
                 result,
                 recording,
             } => {
+                let cancelled = self
+                    .active
+                    .as_ref()
+                    .is_some_and(|active| active.cancel.is_cancelled());
                 self.active = None;
                 let job = self
                     .jobs
@@ -1651,7 +1767,12 @@ impl Worker {
                     Ok(audio::TranscriptionOutcome::Completed(transcript)) => {
                         job.text = transcript.text.clone();
                         job.elapsed_ms = Some(transcript.client_elapsed_ms);
-                        job.status = "completed".into();
+                        job.status = if cancelled && job.dictation_session.is_some() {
+                            "cancelled · result received"
+                        } else {
+                            "completed"
+                        }
+                        .into();
                         job.transcript = Some(transcript);
                     }
                     Ok(audio::TranscriptionOutcome::Cancelled {
@@ -1669,7 +1790,13 @@ impl Worker {
                         self.error = Some(error);
                     }
                 }
-                self.store.save_record(&job_record(job)?)?;
+                let saved = self.store.save_record(&job_record(job)?);
+                if let Err(error) = &saved
+                    && job.dictation_session.is_some()
+                {
+                    self.dictation_error = Some((id, error.to_string()));
+                }
+                saved?;
                 self.status = "Transcription job finished; transcripts are saved locally.".into();
             }
         }
@@ -1751,6 +1878,7 @@ impl Worker {
                         .elapsed_ms
                         .map(|ms| format!("{:.2}s client elapsed", ms as f64 / 1000.0))
                         .unwrap_or_else(|| "Client elapsed unavailable".into()),
+                    dictation_session: j.dictation_session.clone(),
                 })
                 .collect(),
             preferences: self.preferences.clone(),
@@ -1762,6 +1890,7 @@ impl Worker {
             ready: true,
             can_send: self.capabilities.is_some() && !self.runtime_busy.contains("chat"),
             recording: self.recording,
+            dictation_error: self.dictation_error.clone(),
             deletion_preview: self.preview_notice.clone(),
             ..Default::default()
         };
